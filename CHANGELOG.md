@@ -19,6 +19,15 @@ only for a change that breaks something, as CONTRIBUTING.md describes.
   English sentence is left to the rules, which find a Polish first name anywhere. Polish lines,
   in lowercase or without diacritics, and an English spaCy model are untouched; the benchmark is
   unchanged.
+- **Names from code and lines with no language** are no longer taken for people. An agent's
+  tools have parameters such as `replace_all`, which the Polish model tagged as a person: the tool
+  schema holds the name as a key, which cannot be masked, so the gateway refused every call. A
+  span with a backtick, or with a "_" and no Polish first name, is now code on any line, so
+  "jan_kowalski" stays masked. On a line too short to show a language, such as "Max results" or
+  "Skills for", a span with a word in lowercase is kept only when it holds a Polish first name.
+  A line counts as Polish when its Polish words outnumber its English ones, and "ten", "pan",
+  "pod" and "ale", English words too, no longer count; after a colon on an English line, a name
+  is kept: "Contact: John Smith". The benchmark masks what it did, with one stray span fewer.
 - **The gateway masks the prose of tools and answer formats.** Tool descriptions went out as
   written, so a value they held reached the provider, and a value the messages held was found
   there by the last check, which refused the call: an agent with 18 tools could not get a single

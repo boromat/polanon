@@ -79,7 +79,9 @@ tokens reach the provider, and puts the originals back into the answer, also whi
   never seen depend on the Polish language model, which reads those languages poorly. On a plainly
   English line, such as the system prompt of an agent, it took ordinary words for names, so there
   only a capitalised name in mid-sentence is kept: one that opens an English sentence is left to
-  the rules, which find a Polish first name, and nothing else of it.
+  the rules, which find a Polish first name, and nothing else of it. On a line too short to show
+  a language, a name in lowercase is kept only with a Polish first name in it, and a name with a
+  "_" only then too: a place typed in lowercase on such a line, "gdynia" alone, is not masked.
 - **Identification by context.** "The finance director of the only steelworks in Stalowa Wola" names
   a person without naming them. The judge is asked to catch exactly this; a small local model will
   not catch all of it.

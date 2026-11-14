@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from polanon.guards.base import Guard
-from polanon.guards.names_pl import is_common_adjective
+from polanon.guards.names_pl import NAME_FORMS, fold, is_common_adjective
 from polanon.types import Span
 
 logger = logging.getLogger(__name__)
@@ -324,20 +324,21 @@ _ENGLISH_WORDS = frozenset(
     }
 )  # fmt: skip
 
-#: Short Polish words, with and without their diacritics: the evidence against.
+#: Short Polish words, with and without their diacritics: the evidence against. Those English
+#: has too, such as "ten", "pan", "pod" and "ale", are left out.
 _POLISH_WORDS = frozenset(
     {
         "się", "sie", "nie", "jest", "są", "sa", "że", "ze", "oraz", "lub", "czy", "jak", "dla",
         "przez", "jego", "jej", "ich", "który", "ktory", "która", "ktora", "które", "ktore",
         "tak", "też", "tez", "już", "juz", "przy", "przed", "po", "od", "na", "w", "z", "o",
-        "pan", "pani", "panem", "proszę", "prosze", "tylko", "jeszcze", "tego", "tej", "ten",
-        "jako", "pod", "nad", "za", "bez", "ale", "gdy", "kiedy", "gdzie", "co", "kto", "mnie",
-        "mi", "nam", "sprawie",
+        "pani", "panem", "panu", "proszę", "prosze", "tylko", "jeszcze", "tego", "tej", "jako",
+        "nad", "za", "bez", "gdy", "kiedy", "gdzie", "co", "kto", "mnie", "mi", "nam", "sprawie",
     }
 )  # fmt: skip
 
 _POLISH_LETTERS = re.compile("[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]")
 _WORD = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)?")
+_NAME_PARTS = re.compile(r"[\W\d_]+")
 
 #: Fewest English words that make a line English, and how many times the Polish ones they must
 #: outnumber.
@@ -345,23 +346,29 @@ _ENGLISH_EVIDENCE = 3
 _ENGLISH_MARGIN = 3
 
 #: What may stand between the start of a sentence and its first word: spaces, quotes, brackets and
-#: the marks of a Markdown list or heading.
+#: the marks of a Markdown list or heading. A colon is no end: "Contact: John Smith" names him.
 _SENTENCE_OPENERS = frozenset(" \t\"'“”„«»([*_`#>-•")
-_SENTENCE_ENDS = frozenset("\n.!?:;")
+_SENTENCE_ENDS = frozenset("\n.!?")
+
+_ENGLISH, _POLISH, _UNKNOWN = "en", "pl", ""
 
 
-def _is_english(line: str) -> bool:
-    """Return whether a line is plainly English: English words and no sign of Polish.
+def _language(line: str) -> str:
+    """Return whether a line is plainly English, Polish, or shows no language at all.
 
-    A line with one Polish letter is Polish, and so is one whose Polish words come close in number
-    to its English ones, so a Polish sentence typed without diacritics stays Polish.
+    A line with one Polish letter is Polish, and so is one with more Polish words than English
+    ones, so a Polish sentence typed without diacritics stays Polish. English needs three English
+    words and three times as many as Polish ones. Any other line, such as a short heading, a
+    parameter's description or a name from code, shows none.
     """
     if _POLISH_LETTERS.search(line):
-        return False
+        return _POLISH
     words = [word.lower() for word in _WORD.findall(line)]
     english = sum(word in _ENGLISH_WORDS for word in words)
     polish = sum(word in _POLISH_WORDS for word in words)
-    return english >= _ENGLISH_EVIDENCE and english > _ENGLISH_MARGIN * polish
+    if english >= _ENGLISH_EVIDENCE and english > _ENGLISH_MARGIN * polish:
+        return _ENGLISH
+    return _POLISH if polish > english else _UNKNOWN
 
 
 def _capitalised(word: str) -> bool:
@@ -397,16 +404,49 @@ def _named_in_english(text: str, span: Span) -> bool:
     )
 
 
+def _holds_a_first_name(fragment: str) -> bool:
+    """Return whether a word of `fragment`, split also at "_" and digits, is a Polish first name."""
+    return any(fold(part.lower()) in NAME_FORMS for part in _NAME_PARTS.split(fragment) if part)
+
+
+def _is_code(fragment: str) -> bool:
+    """Return whether a span reads as code: a backtick, or a "_" with no Polish first name.
+
+    "replace_all" and "volume_level" are names of parameters, on a line of any language;
+    "jan_kowalski" is somebody's login.
+    """
+    return "`" in fragment or ("_" in fragment and not _holds_a_first_name(fragment))
+
+
+def _named_without_language(fragment: str) -> bool:
+    """Return whether a span on a line that shows no language reads as a name.
+
+    A parameter described as "Max results" or a heading such as "Skills for" shows neither
+    language, and the Polish model tagged such words too. A span with a word in lowercase is kept
+    only when it holds a Polish first name, as "anna nowak" does.
+    """
+    words = fragment.split()
+    return all(not word[0].islower() for word in words) or _holds_a_first_name(fragment)
+
+
 def _without_english_misreadings(text: str, spans: list[Span]) -> list[Span]:
-    """Drop what the Polish model read as a name on a plainly English line, unless it is one."""
-    english: dict[int, bool] = {}
+    """Drop what the Polish model read as a name where the text is not Polish, unless it is one."""
+    languages: dict[int, str] = {}
     kept = []
     for span in spans:
+        fragment = text[span.start : span.end]
+        if _is_code(fragment):
+            continue
         line_start = text.rfind("\n", 0, span.start) + 1
-        if line_start not in english:
+        if line_start not in languages:
             line_end = text.find("\n", span.start)
-            english[line_start] = _is_english(text[line_start : None if line_end < 0 else line_end])
-        if not english[line_start] or _named_in_english(text, span):
+            languages[line_start] = _language(text[line_start : None if line_end < 0 else line_end])
+        language = languages[line_start]
+        if (
+            language == _POLISH
+            or (language == _ENGLISH and _named_in_english(text, span))
+            or (language == _UNKNOWN and _named_without_language(fragment))
+        ):
             kept.append(span)
     return kept
 

@@ -122,6 +122,42 @@ def test_on_an_english_line_the_polish_model_keeps_only_names_in_mid_sentence():
     assert _found(NerGuard(), text, entities) == ["Maria Lindqvist", "nowak", "kowalskim"]
 
 
+def test_after_a_colon_on_an_english_line_a_name_is_kept():
+    text = "Questions about the invoice go to: John Smith, who will answer them."
+    entities = [_Entity(text, "Questions", "orgName"), _Entity(text, "John Smith", "persName")]
+    assert _found(NerGuard(), text, entities) == ["John Smith"]
+
+
+def test_on_a_line_with_no_language_a_lowercase_word_is_no_name():
+    """An agent's tool had a parameter "replace_all"; the model tagged the word as a person.
+
+    The tool schema holds it as a key, which cannot be masked, so the gateway's last check refused
+    every call. A line too short to show a language keeps capitalised spans, and lowercase ones
+    only when they hold a Polish first name.
+    """
+    text = (
+        "replace_all\nnext\nMax results\nSkills for\njan_kowalski\nKOWALSKI JAN\nanna nowak\n"
+        "use `jan`\nUstaw volume_level na pół głośności."
+    )
+    entities = [
+        _Entity(text, "replace_all", "persName"),
+        _Entity(text, "next", "placeName"),
+        _Entity(text, "Max", "persName"),
+        _Entity(text, "Skills for", "orgName"),
+        _Entity(text, "jan_kowalski", "persName"),
+        _Entity(text, "KOWALSKI JAN", "persName"),
+        _Entity(text, "anna nowak", "persName"),
+        _Entity(text, "`jan`", "persName"),
+        _Entity(text, "volume_level", "persName"),
+    ]
+    assert _found(NerGuard(), text, entities) == [
+        "Max",
+        "jan_kowalski",
+        "KOWALSKI JAN",
+        "anna nowak",
+    ]
+
+
 def test_an_english_model_is_trusted_on_english_lines():
     class _EnglishModel:
         lang = "en"
