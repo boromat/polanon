@@ -453,8 +453,9 @@ Co robi z jednym wywołaniem:
   `conversation`, albo prosi o odpowiedź `background` do odebrania później, przyniosłoby tokeny,
   których nikt nie umie przywrócić, więc jest odrzucane. Zaszyfrowane rozumowanie przechodzi bez
   zmian: dostawca zapieczętował je z zamaskowanego tekstu.
-- Maskuje każdą wiadomość, wynik narzędzia i wcześniejsze wywołanie narzędzia, a pole `name`
-  uczestnika pomija; schematy narzędzi przechodzą bez zmian.
+- Maskuje każdą wiadomość, wynik narzędzia i wcześniejsze wywołanie narzędzia, a także tekst
+  w opisach narzędzi i formatu odpowiedzi: opisy, tytuły i przykładowe wartości. Nazwy narzędzi,
+  typy i nazwy parametrów zostają, więc narzędzia dalej działają. Pole `name` uczestnika pomija.
 - Obrazu, pliku ani dźwięku nie da się zamaskować, więc takie wywołanie jest odrzucane;
   `--drop-unsupported` pomija taką treść i wysyła resztę.
 - Zanim cokolwiek wyjdzie, przeszukuje całe zapytanie jeszcze raz pod kątem każdej oryginalnej

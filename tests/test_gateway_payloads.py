@@ -145,6 +145,122 @@ def test_a_tool_call_from_the_history_and_its_result_are_masked():
     assert json.loads(masked["messages"][2]["content"]) == {"pesel": "<PESEL_1>"}
 
 
+def leave_tool():
+    """A tool whose definition holds personal data in every place a schema lets text stand."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "send_leave_notice",
+            "description": f"Wysyła potwierdzenie urlopu do pana Zielińskiego, PESEL {PESEL}.",
+            "parameters": {
+                "type": "object",
+                "title": "Urlop pana Zielińskiego",
+                "properties": {
+                    "employee": {
+                        "type": "string",
+                        "description": "Na przykład Jan Kowalski.",
+                        "enum": ["Jan Kowalski", "Anna Nowak"],
+                        "default": "Jan Kowalski",
+                    },
+                    "description": {
+                        "type": "string",
+                        "examples": ["Urlop dla Anny Nowak"],
+                    },
+                    "days": {"type": "integer", "minimum": 1, "const": 5},
+                },
+                "required": ["employee", "description"],
+                "$defs": {"note": {"type": "string", "description": "Do wiadomości Anny Nowak."}},
+            },
+            "strict": True,
+        },
+    }
+
+
+def test_the_text_of_a_tool_definition_is_masked_and_its_shape_kept():
+    """An agent's tool descriptions went out as written, and with them any value they held."""
+    body = chat(user("Potwierdź urlop."), tools=[leave_tool()])
+    original = copy.deepcopy(body)
+    one = turn()
+    masked = mask_chat_request(one, body)
+    assert body == original
+    sent = json.dumps(masked, ensure_ascii=False)
+    for value in ("Kowalski", "Nowak", "Zielińskiego", PESEL):
+        assert value not in sent
+    assert leaked_tokens(masked, one.mapping) == []
+    function = masked["tools"][0]["function"]
+    assert function["name"] == "send_leave_notice"
+    assert function["strict"] is True
+    schema = function["parameters"]
+    assert schema["type"] == "object"
+    assert schema["required"] == ["employee", "description"]
+    assert set(schema["properties"]) == {"employee", "description", "days"}
+    assert schema["properties"]["employee"]["enum"] == ["<OSOBA_2>", "<OSOBA_3>"]
+    assert schema["properties"]["days"] == {"type": "integer", "minimum": 1, "const": 5}
+    call = {"name": "send_leave_notice", "arguments": json.dumps({"employee": "<OSOBA_2>"})}
+    answer = {"choices": [{"message": {"role": "assistant", "tool_calls": [{"function": call}]}}]}
+    restored = restore_chat_response(one, answer)["choices"][0]["message"]["tool_calls"][0]
+    assert json.loads(restored["function"]["arguments"]) == {"employee": "Jan Kowalski"}
+
+
+def test_a_value_found_in_a_tool_definition_is_masked_in_the_messages_and_back():
+    """Only "pana Zielińskiego" reads as a person; "od Zielińskiego" alone does not.
+
+    Wherever the form of address stands, the value is masked everywhere else as well: in the
+    messages, in the other tools and in the tool that held it.
+    """
+    note = {
+        "type": "function",
+        "function": {"name": "notes", "description": "Notatki od Zielińskiego."},
+    }
+    body = chat(
+        user("Notatka od Zielińskiego jest gotowa."),
+        tools=[note, {"type": "function", "function": {"name": "call", "description": "Dzwoni."}}],
+    )
+    for where in ("tool", "message"):
+        found = copy.deepcopy(body)
+        if where == "tool":
+            found["tools"][1]["function"]["description"] = "Dzwoni do pana Zielińskiego."
+        else:
+            found["messages"].append(user("Zadzwoń do pana Zielińskiego."))
+        one = turn()
+        masked = mask_chat_request(one, found)
+        assert "Zielińskiego" not in json.dumps(masked, ensure_ascii=False), where
+        assert leaked_tokens(masked, one.mapping) == [], where
+
+
+def test_a_legacy_function_and_a_response_format_are_masked_too():
+    schema = {
+        "type": "object",
+        "properties": {"who": {"type": "string", "description": "Na przykład Jan Kowalski."}},
+        "examples": [{"who": "Jan Kowalski", "age": 40}],
+    }
+    body = chat(
+        user("Kto?"),
+        functions=[{"name": "find", "description": "Szuka Anny Nowak.", "parameters": schema}],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {"name": "person", "description": "Dane Anny Nowak.", "schema": schema},
+        },
+    )
+    one = turn()
+    masked = mask_chat_request(one, body)
+    sent = json.dumps(masked, ensure_ascii=False)
+    assert "Kowalski" not in sent
+    assert "Nowak" not in sent
+    assert masked["functions"][0]["name"] == "find"
+    token = {value: token for token, value in one.mapping.items()}["Jan Kowalski"]
+    assert masked["functions"][0]["parameters"]["examples"] == [{"who": token, "age": 40}]
+    assert masked["response_format"]["json_schema"]["name"] == "person"
+    assert set(masked["response_format"]["json_schema"]["schema"]["properties"]) == {"who"}
+    assert leaked_tokens(masked, one.mapping) == []
+
+
+def test_a_tool_that_is_not_a_dictionary_passes_for_the_provider_to_refuse():
+    masked = mask_chat_request(turn(), chat(user("Hej."), tools=["find"], functions=[None]))
+    assert masked["tools"] == ["find"]
+    assert masked["functions"] == [None]
+
+
 def test_the_input_of_an_embeddings_request_is_masked_with_one_turn():
     one = turn()
     masked = mask_embeddings_request(one, {"model": "e", "input": ["Jan Kowalski", "Kowalski"]})
@@ -535,6 +651,37 @@ def test_tool_outputs_and_custom_tools_are_masked():
     sent = json.dumps(mask_responses_request(turn(), body), ensure_ascii=False)
     assert "Kowalski" not in sent
     assert PESEL not in sent
+
+
+def test_the_tools_and_the_answer_format_of_a_responses_request_are_masked():
+    function = leave_tool()["function"]
+    body = {
+        "instructions": "Notatki od Zielińskiego czytaj uważnie.",
+        "input": [{"role": "user", "content": "Potwierdź urlop."}],
+        "tools": [
+            {"type": "function", **function},
+            {"type": "custom", "name": "sql", "description": "Zapytania Anny Nowak."},
+            {"type": "web_search"},
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "leave",
+                "description": "Dane Jana Kowalskiego.",
+                "schema": function["parameters"],
+            }
+        },
+    }
+    one = turn()
+    masked = mask_responses_request(one, body)
+    sent = json.dumps(masked, ensure_ascii=False)
+    for value in ("Kowalski", "Nowak", "Zielińskiego", PESEL):
+        assert value not in sent
+    assert leaked_tokens(masked, one.mapping) == []
+    assert [tool.get("name") for tool in masked["tools"]] == ["send_leave_notice", "sql", None]
+    assert masked["tools"][2] == {"type": "web_search"}
+    assert masked["text"]["format"]["name"] == "leave"
+    assert masked["text"]["format"]["schema"]["required"] == ["employee", "description"]
 
 
 def test_an_input_item_or_part_that_is_not_a_dictionary_is_refused():

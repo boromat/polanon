@@ -19,6 +19,15 @@ only for a change that breaks something, as CONTRIBUTING.md describes.
   English sentence is left to the rules, which find a Polish first name anywhere. Polish lines,
   in lowercase or without diacritics, and an English spaCy model are untouched; the benchmark is
   unchanged.
+- **The gateway masks the prose of tools and answer formats.** Tool descriptions went out as
+  written, so a value they held reached the provider, and a value the messages held was found
+  there by the last check, which refused the call: an agent with 18 tools could not get a single
+  call through. Now the descriptions and titles of the tools, the legacy `functions`, a JSON-schema
+  `response_format` and the Responses API's `text.format` are masked, and so are the values of
+  `enum`, `const`, `default` and `examples`; a model answering with such a token gets it back in
+  the arguments. Tool names, types and the names of parameters stay, so the provider still checks
+  answers against the schema. A value found in a tool is masked in the messages, and one found in
+  the messages in every tool.
 
 ## [0.3.4] - 2026-11-14
 

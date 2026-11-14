@@ -438,8 +438,9 @@ What it does with a call:
   `conversation`, or asks for a `background` response to fetch later, would bring back tokens no
   one can restore, and is refused. Encrypted reasoning passes as it is: the provider sealed it from
   masked text.
-- Every message, tool result and earlier tool call is masked, and a participant's `name` is left
-  out; tool schemas pass as they are.
+- Every message, tool result and earlier tool call is masked, and so is the prose of the tools and
+  of an answer format: descriptions, titles and example values. Tool names, types and parameter
+  names stay, so the tools keep working. A participant's `name` is left out.
 - An image, a file or audio cannot be masked, so the call is refused; `--drop-unsupported` leaves
   such content out and sends the rest.
 - Before anything leaves, the payload is searched once more for every original value, and the call

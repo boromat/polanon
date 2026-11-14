@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from polanon.pipeline import mask_known_values
@@ -36,9 +36,20 @@ _PARTICIPANT_ROLES = frozenset({"system", "developer", "user", "assistant"})
 
 #: Fields of a chat completion request, other than the messages, that carry text the operator's
 #: users wrote: an end user's identifier, the metadata stored with a completion, and the content a
-#: predicted output is compared with. Tool schemas and response formats describe the shape of an
-#: answer, not data, and pass as they are.
+#: predicted output is compared with. Tools and answer formats are masked apart, in their prose
+#: only: see :func:`_schema`.
 _TEXT_FIELDS = ("user", "safety_identifier", "metadata", "prediction")
+
+#: Keys of a JSON schema whose string is prose somebody wrote, and keys whose value is an example
+#: of the data itself. Everything else in a schema is its shape and passes as it is.
+_SCHEMA_PROSE = frozenset({"description", "title"})
+_SCHEMA_VALUES = frozenset({"enum", "const", "default", "examples", "example"})
+#: Keys of a JSON schema that name schemas: the names are the shape, the schemas are walked.
+_SCHEMA_MAPS = frozenset(
+    {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"}
+)
+
+_Text = Callable[[str], str]
 
 
 class GatewayRequestError(ValueError):
@@ -56,8 +67,12 @@ def mask_chat_request(
     The messages are masked by :meth:`MaskedTurn.mask_messages`: text, tool results and the
     arguments of earlier tool calls. A participant's ``name`` is left out, since it may be a
     person's and the API allows no token there. An end user's identifier, stored metadata and a
-    predicted output are masked as well. An answer in audio cannot be restored, so a request for
-    one is refused.
+    predicted output are masked as well, and so is the prose of the tools, the legacy
+    ``functions`` and a JSON-schema ``response_format``: descriptions, titles and the example
+    values of ``enum``, ``const``, ``default`` and ``examples``, while names, types and property
+    names stay, so the tools keep working. A value found in a tool is masked in the messages too,
+    and one found in the messages in every tool. An answer in audio cannot be restored, so a
+    request for one is refused.
 
     Args:
         turn: the turn of this call; its mapping restores the answer afterwards.
@@ -76,11 +91,14 @@ def mask_chat_request(
     modalities = body.get("modalities")
     if isinstance(modalities, list) and any(item != "text" for item in modalities):
         raise GatewayRequestError("the polanon gateway can restore text answers only, not audio")
+    defined = _chat_definitions(body, turn.mask)
     masked = [_without_participant(message) for message in turn.mask_messages(messages)]
-    out = {**body, "messages": masked}
+    out = {**body, **defined, "messages": masked}
     for field in _TEXT_FIELDS:
         if body.get(field) is not None:
             out[field] = turn.mask_data(body[field])
+    if defined:
+        out.update(_chat_definitions(out, _known_values(turn)))
     if instructions:
         out["messages"] = _with_instructions(masked, instructions)
     return out
@@ -122,7 +140,9 @@ def mask_responses_request(
     and the output of tool calls, and the summary of a model's reasoning, which the gateway
     restored on the way back. Encrypted reasoning and compaction pass as they are: the provider
     sealed them from text it got masked. A value first recognised in a later item is also masked
-    in the earlier ones, as :meth:`MaskedTurn.mask_messages` does for chat messages.
+    in the earlier ones, as :meth:`MaskedTurn.mask_messages` does for chat messages. The prose of
+    the tools and of a JSON-schema answer format in ``text.format`` is masked as
+    :func:`mask_chat_request` masks it.
 
     The gateway keeps nothing between calls, so the client sends the whole conversation, as
     Hermes Agent does with ``store: false``. A request that leaves it at the provider, with
@@ -160,6 +180,7 @@ def mask_responses_request(
     value = body.get("input")
     if value is not None and not isinstance(value, str | list):
         raise GatewayRequestError("input is a string or a list of items")
+    defined = _responses_definitions(body, turn.mask)
     pieces: list[tuple[str, Any]] = []
     if isinstance(body.get("instructions"), str):
         pieces.append(("instructions", body["instructions"]))
@@ -182,7 +203,7 @@ def mask_responses_request(
         mask(kind, original) if size < final else result
         for (kind, original), size, result in zip(pieces, sizes, masked, strict=True)
     ]
-    out = dict(body)
+    out = {**body, **defined}
     if pieces and pieces[0][0] == "instructions":
         out["instructions"] = done.pop(0)
     if isinstance(value, str):
@@ -195,6 +216,8 @@ def mask_responses_request(
     prompt = body.get("prompt")
     if isinstance(prompt, Mapping) and prompt.get("variables") is not None:
         out["prompt"] = {**prompt, "variables": turn.mask_data(prompt["variables"])}
+    if defined:
+        out.update(_responses_definitions(out, _known_values(turn)))
     if instructions:
         given = out.get("instructions")
         out["instructions"] = f"{given}\n\n{instructions}" if given else instructions
@@ -474,6 +497,97 @@ def _json_masked(turn: MaskedTurn, text: str) -> str:
     if isinstance(parsed, dict | list):
         return json.dumps(turn.mask_data(parsed), ensure_ascii=False)
     return turn.mask(text)
+
+
+def _chat_definitions(body: Mapping[str, Any], text: _Text) -> dict[str, Any]:
+    """The tools, legacy functions and answer format of a chat request, prose through `text`."""
+    out: dict[str, Any] = {}
+    if isinstance(body.get("tools"), list):
+        out["tools"] = [_tool(tool, text) for tool in body["tools"]]
+    if isinstance(body.get("functions"), list):
+        out["functions"] = [_definition(function, text) for function in body["functions"]]
+    answer = body.get("response_format")
+    if isinstance(answer, Mapping) and isinstance(answer.get("json_schema"), Mapping):
+        out["response_format"] = {**answer, "json_schema": _definition(answer["json_schema"], text)}
+    return out
+
+
+def _responses_definitions(body: Mapping[str, Any], text: _Text) -> dict[str, Any]:
+    """The tools and answer format of a Responses API request, their prose through `text`."""
+    out: dict[str, Any] = {}
+    if isinstance(body.get("tools"), list):
+        out["tools"] = [_tool(tool, text) for tool in body["tools"]]
+    settings = body.get("text")
+    if isinstance(settings, Mapping) and isinstance(settings.get("format"), Mapping):
+        out["text"] = {**settings, "format": _definition(settings["format"], text)}
+    return out
+
+
+def _known_values(turn: MaskedTurn) -> _Text:
+    """Replace in a text every value the turn has found so far, without detecting anew.
+
+    The tools are masked before the messages, so a value found in a tool is known when the
+    messages are masked; this pass then masks in the tools a value found later, in the messages or
+    in another tool. It follows the rules :func:`leaked_tokens` checks by.
+    """
+    mapping = turn.mapping
+    return lambda text: mask_known_values(text, mapping)
+
+
+def _tool(tool: Any, text: _Text) -> Any:
+    """A tool of either API: chat nests the function in ``function``, the Responses API does not."""
+    if isinstance(tool, Mapping) and isinstance(tool.get("function"), Mapping):
+        return {**tool, "function": _definition(tool["function"], text)}
+    return _definition(tool, text)
+
+
+def _definition(definition: Any, text: _Text) -> Any:
+    """A function, a custom tool or an answer format: its description and its schema's prose."""
+    if not isinstance(definition, Mapping):
+        return definition
+    out = dict(definition)
+    if isinstance(out.get("description"), str):
+        out["description"] = text(out["description"])
+    for field in ("parameters", "schema"):
+        if field in out:
+            out[field] = _schema(out[field], text)
+    return out
+
+
+def _schema(schema: Any, text: _Text) -> Any:
+    """A JSON schema with its prose and example values through `text` and its shape untouched.
+
+    Descriptions and titles are prose; ``enum``, ``const``, ``default`` and ``examples`` hold
+    values of the data, and a model that answers with a token there gets it restored in the
+    arguments. Types, formats, patterns, required fields and the names of properties are the shape
+    the provider checks an answer against, and stay.
+    """
+    if isinstance(schema, list):
+        return [_schema(item, text) for item in schema]
+    if not isinstance(schema, Mapping):
+        return schema
+    out: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key in _SCHEMA_PROSE and isinstance(value, str):
+            out[key] = text(value)
+        elif key in _SCHEMA_VALUES:
+            out[key] = _strings(value, text)
+        elif key in _SCHEMA_MAPS and isinstance(value, Mapping):
+            out[key] = {name: _schema(item, text) for name, item in value.items()}
+        else:
+            out[key] = _schema(value, text)
+    return out
+
+
+def _strings(value: Any, text: _Text) -> Any:
+    """Every string of a JSON-like value through `text`; keys and numbers stay."""
+    if isinstance(value, str):
+        return text(value)
+    if isinstance(value, Mapping):
+        return {key: _strings(item, text) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_strings(item, text) for item in value]
+    return value
 
 
 def _without_participant(message: dict[str, Any]) -> dict[str, Any]:

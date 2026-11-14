@@ -192,7 +192,8 @@ application's part:
 It is software the operator runs on their own machine, not a service: nobody else holds the
 calls, the keys or the logs. What it protects:
 
-- **What reaches the provider.** Every message, tool result and earlier tool call is masked, a
+- **What reaches the provider.** Every message, tool result and earlier tool call is masked, and
+  so are the descriptions, titles and example values of the tools and of an answer format; a
   participant's `name` is left out, and before a call leaves its whole payload is searched once more
   for every original value, by the rules the masking follows; a call that still holds one is not
   sent. Endpoints other than chat completions, the Responses API, embeddings and the list of
@@ -219,7 +220,8 @@ What it does not protect, and is the operator's part:
 - **Detection.** The gateway masks what the guards find, no more: run it with the spaCy model, and
   read "Residual risk" below. The stage-2 judge is not used.
 - **What the provider learns anyway.** The structure of the conversation, its length and timing,
-  the tool schemas, and whatever the tokens' context gives away.
+  the shape of the tools (their names, types and parameter names), and whatever the tokens' context
+  gives away.
 
 ## Residual risk to accept consciously
 
