@@ -430,6 +430,30 @@ def test_the_arguments_of_a_streamed_tool_call_are_restored_into_valid_json():
     assert json.loads(joined) == {"firma": one.mapping[token]}
 
 
+def test_a_chat_answer_and_its_arguments_come_back_in_the_case_asked_for():
+    one = turn()
+    mask_chat_request(one, chat(user("Wniosek pracownika Jana Kowalskiego.")))
+    arguments = json.dumps({"employee": "<OSOBA_1:mianownik>"})
+    call = {"id": "c1", "type": "function", "function": {"name": "f", "arguments": arguments}}
+    message = {"role": "assistant", "content": "Szanowny Panie <OSOBA_1:wołacz>,"}
+    message["tool_calls"] = [call]
+    restored = restore_chat_response(one, {"choices": [{"index": 0, "message": message}]})
+    sent = restored["choices"][0]["message"]
+    assert sent["content"] == "Szanowny Panie Janie Kowalski,"
+    arguments_sent = sent["tool_calls"][0]["function"]["arguments"]
+    assert json.loads(arguments_sent) == {"employee": "Jan Kowalski"}
+    stream = ChatStream(one.mapping)
+    joined = ""
+    for piece in _cut(arguments, 4):
+        chunk = stream.chunk(_call_chunk({"index": 0, "function": {"arguments": piece}}))
+        for streamed in chunk["choices"][0]["delta"].get("tool_calls", []):
+            joined += streamed["function"].get("arguments", "")
+    end = stream.chunk({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]})
+    for streamed in end["choices"][0]["delta"].get("tool_calls", []):
+        joined += streamed["function"].get("arguments", "")
+    assert json.loads(joined) == {"employee": "Jan Kowalski"}
+
+
 def test_a_stream_that_ends_without_finishing_gives_back_what_it_held():
     one = turn()
     mask_chat_request(one, chat(user("Jan Kowalski.")))
@@ -757,6 +781,24 @@ def test_the_arguments_of_a_streamed_function_call_come_back_as_valid_json():
     joined = "".join(e["delta"] for e in out if e["type"].endswith(".delta"))
     assert json.loads(joined) == {"firma": one.mapping[token]}
     assert json.loads(out[-1]["arguments"]) == {"firma": one.mapping[token]}
+
+
+def test_a_streamed_responses_answer_comes_back_in_the_case_asked_for():
+    one = turn()
+    mask_responses_request(one, {"input": "Wniosek pracownika Jana Kowalskiego."})
+    stream = ResponsesStream(one.mapping)
+    where = {"item_id": "m1", "output_index": 0, "content_index": 0}
+    text = "Szanowny Panie <OSOBA_1:wołacz>, rozmawiałem z <OSOBA_1:narzędnik>."
+    events = [_delta("output_text", piece, n, **where) for n, piece in enumerate(_cut(text))]
+    events.append({"type": "response.output_text.done", "text": text, **where})
+    out = [sent for event in events for sent in stream.events(event)]
+    expected = "Szanowny Panie Janie Kowalski, rozmawiałem z Janem Kowalskim."
+    assert "".join(e["delta"] for e in out if e["type"].endswith(".delta")) == expected
+    assert out[-1]["text"] == expected
+    restored = restore_responses_response(
+        one, {"output": [{"type": "function_call", "arguments": '{"who": "<OSOBA_1:mianownik>"}'}]}
+    )
+    assert json.loads(restored["output"][0]["arguments"]) == {"who": "Jan Kowalski"}
 
 
 def test_a_responses_stream_cut_short_gives_back_what_it_held():

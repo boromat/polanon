@@ -16,10 +16,10 @@ from polanon._matching import Haystack, fold, known_value_ranges, type_of
 from polanon._view import detection_view
 from polanon.allowlist import _ATTACHED_ENDINGS, Allowlist
 from polanon.guards.base import Guard
-from polanon.policy import TOKEN_PATTERN
+from polanon.stream_restore import RESTORED_TOKEN_PATTERN
 from polanon.types import Span, merge_spans
 
-_TOKEN_RE = re.compile(TOKEN_PATTERN)
+_TOKEN_RE = re.compile(RESTORED_TOKEN_PATTERN)
 
 #: Endings a restored token may take on without the answer inventing new data: the endings written
 #: straight after a name, plus the suffixed forms a longer name declines through ("Kowalskiego").
@@ -90,7 +90,8 @@ def sweep(
     still known.
     """
     tokens = list(_TOKEN_RE.finditer(restored_text))
-    unknown = sorted({m.group(0) for m in tokens if m.group(0) not in mapping})
+    written = {f"<{m['label']}_{m['n']}>" for m in tokens}
+    unknown = sorted(token for token in written if token not in mapping)
     view = detection_view(restored_text)
     known = [(value, token) for token, value in mapping.items() if value != token]
     covered = bytearray(len(restored_text))

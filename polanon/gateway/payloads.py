@@ -9,17 +9,13 @@ mapping that restores the answer is the one the request was masked with.
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from polanon.pipeline import mask_known_values
-from polanon.policy import TOKEN_PATTERN
-from polanon.stream_restore import StreamRestorer
+from polanon.stream_restore import StreamRestorer, restored
 from polanon.turn import MaskedTurn
 from polanon.types import MaskingUnavailableError
-
-_TOKEN_RE = re.compile(TOKEN_PATTERN)
 
 #: Items of a Responses API input that carry nothing to mask: blobs the provider sealed from text
 #: it got masked, which no one else can read or change.
@@ -274,7 +270,6 @@ class ChatStream:
     def __init__(self, mapping: Mapping[str, str]) -> None:
         """Start a stream restored with the mapping its request was masked with."""
         self._mapping = dict(mapping)
-        self._escaped = {token: _json_escaped(value) for token, value in self._mapping.items()}
         self._texts: dict[tuple[int, str], StreamRestorer] = {}
         self._arguments: dict[tuple[int, int], StreamRestorer] = {}
         self._template: dict[str, Any] | None = None
@@ -339,7 +334,8 @@ class ChatStream:
         return self._texts.setdefault((index, field), StreamRestorer(self._mapping))
 
     def _argument(self, index: int, call: int) -> StreamRestorer:
-        return self._arguments.setdefault((index, call), StreamRestorer(self._escaped))
+        restorer = StreamRestorer(self._mapping, escape=_json_escaped)
+        return self._arguments.setdefault((index, call), restorer)
 
 
 class ResponsesStream:
@@ -355,7 +351,6 @@ class ResponsesStream:
     def __init__(self, mapping: Mapping[str, str]) -> None:
         """Start a stream restored with the mapping its request was masked with."""
         self._mapping = dict(mapping)
-        self._escaped = {token: _json_escaped(value) for token, value in self._mapping.items()}
         self._texts: dict[tuple[Any, ...], tuple[dict[str, Any], StreamRestorer]] = {}
         self._sequence = 0
 
@@ -389,9 +384,9 @@ class ResponsesStream:
     def _restorer(self, event: dict[str, Any]) -> StreamRestorer:
         key = _sequence_key(event, ".delta")
         if key not in self._texts:
-            mapping = self._escaped if "arguments" in key[0] else self._mapping
+            escape = _json_escaped if "arguments" in key[0] else None
             template = {name: value for name, value in event.items() if name != "delta"}
-            self._texts[key] = (template, StreamRestorer(mapping))
+            self._texts[key] = (template, StreamRestorer(self._mapping, escape=escape))
         return self._texts[key][1]
 
     def _held(self, event: dict[str, Any]) -> dict[str, Any] | None:
@@ -615,9 +610,7 @@ def _with_instructions(messages: list[dict[str, Any]], instructions: str) -> lis
 
 def _restored(value: Any, mapping: Mapping[str, str], *, arguments: bool = False) -> Any:
     if isinstance(value, str):
-        if arguments:
-            return _TOKEN_RE.sub(lambda m: _escaped_value(mapping, m[0]), value)
-        return _TOKEN_RE.sub(lambda m: mapping.get(m[0], m[0]), value)
+        return restored(value, mapping, escape=_json_escaped if arguments else None)
     if isinstance(value, dict):
         return {
             key: _restored(item, mapping, arguments=arguments or key == "arguments")
@@ -626,11 +619,6 @@ def _restored(value: Any, mapping: Mapping[str, str], *, arguments: bool = False
     if isinstance(value, list):
         return [_restored(item, mapping, arguments=arguments) for item in value]
     return value
-
-
-def _escaped_value(mapping: Mapping[str, str], token: str) -> str:
-    value = mapping.get(token)
-    return token if value is None else _json_escaped(value)
 
 
 def _json_escaped(value: str) -> str:

@@ -27,6 +27,7 @@ from polanon._view import detection_view
 from polanon.guards.base import Guard
 from polanon.policy import TOKEN_PATTERN
 from polanon.pseudonyms import PseudonymCollisionError, Pseudonyms
+from polanon.stream_restore import tokens_written
 from polanon.types import AnonymizationResult, MaskingUnavailableError, Span
 
 if TYPE_CHECKING:
@@ -129,8 +130,11 @@ class MaskedChunks:
 
 
 def tokens_in(*texts: str) -> set[str]:
-    """Return every token that appears in `texts`, such as the passages a search found."""
-    return {match.group(0) for text in texts for match in _TOKEN_RE.finditer(text)}
+    """Return every token that appears in `texts`, such as the passages a search found.
+
+    A token a model wrote with a case, ``<OSOBA_1:wołacz>``, counts as the token it declines.
+    """
+    return {token for text in texts for token in tokens_written(text)}
 
 
 def stored_mapping(store: MappingStore, *texts: str) -> dict[str, str]:

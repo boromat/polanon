@@ -159,6 +159,28 @@ def test_tool_arguments_and_answers_are_restored():
     assert turn.restore("Dzień dobry <OSOBA_1>") == "Dzień dobry Jan Kowalski"
 
 
+def test_a_person_comes_back_in_the_case_the_model_asks_for():
+    """ "pracownika Jana Kowalskiego" came back as "Szanowny Panie Jana Kowalskiego"."""
+    turn = anonymizer.turn()
+    turn.mask("Wniosek pracownika Jana Kowalskiego, tel. 600 100 200.")
+    answer = (
+        "Szanowny Panie <OSOBA_1:wołacz>, wniosek <OSOBA_1:dopełniacz> przyjęto. "
+        "Telefon <TELEFON_1:mianownik>, a <OSOBA_1> to jak w tekście."
+    )
+    assert turn.restore(answer) == (
+        "Szanowny Panie Janie Kowalski, wniosek Jana Kowalskiego przyjęto. "
+        "Telefon 600 100 200, a Jana Kowalskiego to jak w tekście."
+    )
+    arguments = {"employee": "<OSOBA_1:mianownik>", "case": "<OSOBA_1:przypadek>"}
+    assert turn.restore_data(arguments) == {
+        "employee": "Jan Kowalski",
+        "case": "Jana Kowalskiego",
+    }
+    assert Anonymizer.restore(answer, turn.mapping) == turn.restore(answer)
+    assert turn.restore("Kto to <OSOBA_9:wołacz>?") == "Kto to <OSOBA_9:wołacz>?"
+    assert turn.unknown_tokens("Kto to <OSOBA_9:wołacz> i <OSOBA_1:wołacz>?") == ["<OSOBA_9>"]
+
+
 def test_a_restorer_taken_early_knows_the_tokens_of_later_tool_results():
     turn = anonymizer.turn()
     turn.mask("Jan Kowalski")
@@ -411,6 +433,16 @@ def test_the_token_instructions_name_tokens_the_library_hands_out(language):
     tokens = re.findall(TOKEN_PATTERN, note)
     assert len(tokens) == 3
     assert {label for label, _ in tokens} <= set(ENTITY_TYPES.values())
+
+
+def test_the_polish_note_asks_for_a_person_s_case_and_its_examples_restore():
+    note = token_instructions("pl")
+    asked = re.findall(r"<OSOBA_1:([^>]+)>", note)
+    assert {"wołacz", "dopełniacz", "mianownik"} <= set(asked)
+    turn = anonymizer.turn()
+    turn.mask("Jana Kowalskiego")
+    assert "<OSOBA_1:" not in turn.restore(note)
+    assert ":" not in "".join(re.findall(r"<[A-Z_]+_\d+(?::[^>]*)?>", token_instructions("en")))
 
 
 def test_the_token_instructions_are_polish_unless_asked_otherwise():

@@ -521,10 +521,16 @@ second.anonymized  # "Ten sam PESEL <PESEL_1>"
 mapping = second.mapping  # wszystko do tej pory, na kolejną turę rozmowy
 ```
 
-**Token przywraca formę, którą zastąpił.** Maskowanie działa na tekście w takiej postaci, w jakiej
-jest zapisany, więc imię i nazwisko zamaskowane w dopełniaczu wraca w dopełniaczu. Poproś model, żeby
-zostawiał tokeny tam, gdzie pozwala na to gramatyka („dla <OSOBA_1>”), albo przywracaj do szablonu,
-nad którym masz kontrolę. Zapisy różniące się tylko wielkością liter, rodzajem białych znaków (spacja
+**Token przywraca formę, którą zastąpił, chyba że model poda przypadek.** Maskowanie działa na
+tekście w takiej postaci, w jakiej jest zapisany, więc imię i nazwisko zamaskowane w dopełniaczu
+wraca w dopełniaczu. Model może dopisać po dwukropku przypadek, którego wymaga jego zdanie, a imię
+i nazwisko wróci odmienione: `Szanowny Panie <OSOBA_1:wołacz>` daje „Szanowny Panie Janie
+Kowalski” tam, gdzie tekst mówił „Jana Kowalskiego”. Prosi o to `token_instructions("pl")`,
+a rozumie to każde przywracanie, także strumień i bramka. Odmieniane są imiona i nazwiska z jednego
+lub dwóch słów, które reguły czytają na pewno: imię z listy i nazwisko w rodzaju Kowalski, Nowak,
+Bednarek, Mickiewicz albo Duda. Samo nazwisko, które może należeć do mężczyzny albo kobiety, obce
+nazwisko, firma i miejsce wracają tak, jak były zapisane, a przypadek znika. Zapisy różniące się
+tylko wielkością liter, rodzajem białych znaków (spacja
 niełamiąca, podział wiersza, kilka spacji z rzędu) albo niewidocznymi znakami to ta sama wartość;
 tak samo identyfikator, którego grupy zapisano osobno albo razem: wszystkie te zapisy dzielą jeden
 token, a przywracanie wstawia ten, który pojawił się jako pierwszy. Wyjątkiem są hasła i typy

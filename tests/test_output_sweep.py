@@ -20,6 +20,11 @@ def test_invented_token_is_reported():
     assert report.unknown_tokens == ["<OSOBA_7>"]
 
 
+def test_an_invented_token_with_a_case_is_reported_too():
+    report = sweep("Napisz do <OSOBA_7:dopełniacz>.", {"<OSOBA_1>": "Jan"}, GUARDS, ALL)
+    assert report.unknown_tokens == ["<OSOBA_7>"]
+
+
 def test_restored_known_value_is_not_reported_as_new():
     report = sweep("Kontakt: a@b.example", {"<EMAIL_1>": "a@b.example"}, GUARDS, ALL)
     assert report.new_spans == []

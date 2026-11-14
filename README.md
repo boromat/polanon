@@ -502,9 +502,15 @@ second.anonymized  # "Ten sam PESEL <PESEL_1>"
 mapping = second.mapping  # everything so far, for the next turn
 ```
 
-**A token restores the form it replaced.** Masking happens on the text as written, so a name masked
-in the genitive comes back in the genitive. Ask the model to keep tokens where the grammar allows it
-("dla <OSOBA_1>"), or restore into a template you control. Spellings that differ only in letter
+**A token restores the form it replaced, unless the model names a case.** Masking happens on the
+text as written, so a name masked in the genitive comes back in the genitive. The model may write
+the case its own sentence needs after a colon, and a person's name comes back declined:
+`Szanowny Panie <OSOBA_1:wołacz>` gives "Szanowny Panie Janie Kowalski" where the text said "Jana
+Kowalskiego". `token_instructions("pl")` asks for it, and every restore understands it, streams and
+the gateway included. Declined are names of one or two words the rules read for sure: a listed
+first name and a surname such as Kowalski, Nowak, Bednarek, Mickiewicz or Duda. A surname alone
+that may be a man's or a woman's, a foreign name, a company and a place come back as written, and
+the case is dropped. Spellings that differ only in letter
 case, in the kind of whitespace (a no-break space, a line break, a run of spaces) or in invisible
 characters are the same value, and so are an identifier's groups written apart or together: they
 share its token, and restore writes the spelling seen first. Passwords and custom types are the

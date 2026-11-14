@@ -26,7 +26,6 @@ identifiers.
 """
 
 import importlib.util
-import re
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
@@ -56,7 +55,7 @@ from polanon.output_sweep import SweepReport, sweep
 from polanon.pipeline import _anonymize_stage1, anonymize, mask_known_values
 from polanon.policy import ENTITY_TYPES, TOKEN_PATTERN, token_for
 from polanon.pseudonyms import PseudonymCollisionError, Pseudonyms
-from polanon.stream_restore import StreamRestorer
+from polanon.stream_restore import StreamRestorer, restored
 from polanon.turn import MaskedTurn, UnknownBlocks, token_instructions
 from polanon.types import (
     AnonymizationResult,
@@ -320,8 +319,12 @@ class Anonymizer:
 
     @staticmethod
     def restore(text: str, mapping: dict[str, str]) -> str:
-        """Replace every known token with its original value. Unknown tokens are left untouched."""
-        return re.sub(TOKEN_PATTERN, lambda m: mapping.get(m.group(0), m.group(0)), text)
+        """Replace every known token with its original value. Unknown tokens are left untouched.
+
+        A person's token with a case, ``<OSOBA_1:wołacz>``, comes back declined, as
+        :meth:`MaskedTurn.restore` describes.
+        """
+        return restored(text, mapping)
 
     @staticmethod
     def stream_restorer(mapping: dict[str, str]) -> StreamRestorer:

@@ -22,6 +22,26 @@ def test_character_by_character_stream_restores_identically():
     assert out == EXPECTED
 
 
+CASED = {"<OSOBA_1>": "Jana Kowalskiego"}
+CASED_TEXT = "Szanowny Panie <OSOBA_1:wołacz>, <OSOBA_1:miejscownik> i <OSOBA_1> też."
+
+
+@pytest.mark.parametrize("split_at", range(len(CASED_TEXT) + 1))
+def test_a_token_with_its_case_split_anywhere_restores_identically(split_at):
+    restorer = StreamRestorer(CASED)
+    shown = restorer.feed(CASED_TEXT[:split_at]) + restorer.feed(CASED_TEXT[split_at:])
+    shown += restorer.flush()
+    assert shown == "Szanowny Panie Janie Kowalski, Janie Kowalskim i Jana Kowalskiego też."
+    assert shown == Anonymizer.restore(CASED_TEXT, CASED)
+
+
+def test_a_case_that_never_closes_is_let_go():
+    restorer = StreamRestorer(CASED)
+    text = "<OSOBA_1:" + "a" * 40
+    assert restorer.feed(text) == text
+    assert restorer.buffer == ""
+
+
 def test_unknown_tokens_are_passed_through_untouched():
     restorer = StreamRestorer(MAPPING)
     assert restorer.feed("kto to <OSOBA_9>?") + restorer.flush() == "kto to <OSOBA_9>?"

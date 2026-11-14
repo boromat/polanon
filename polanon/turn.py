@@ -10,7 +10,6 @@ the history to the last tool result, and it refuses with
 from __future__ import annotations
 
 import json
-import re
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
 from typing import TYPE_CHECKING, Any, Literal
@@ -18,14 +17,11 @@ from typing import TYPE_CHECKING, Any, Literal
 from polanon._matching import type_of
 from polanon.guards.denylist import DenylistGuard
 from polanon.output_sweep import SweepReport
-from polanon.policy import TOKEN_PATTERN
-from polanon.stream_restore import StreamRestorer
+from polanon.stream_restore import StreamRestorer, restored, tokens_written
 from polanon.types import MaskingUnavailableError
 
 if TYPE_CHECKING:
     from polanon import Anonymizer
-
-_TOKEN_RE = re.compile(TOKEN_PATTERN)
 
 #: What :meth:`MaskedTurn.mask_messages` does with a block no text mask reaches, such as an image,
 #: a document or a model's signed reasoning: refuse the whole list, or leave the block out.
@@ -40,6 +36,10 @@ _INSTRUCTIONS = {
         "w nawiasach ostrych, takimi jak <OSOBA_1>, <EMAIL_1> albo <FIRMA_1>. Traktuj token jak "
         "prawdziwą wartość. Gdy przekazujesz go do narzędzia albo cytujesz w odpowiedzi, przepisz "
         "go dokładnie tak, jak jest zapisany: bez odmiany, bez zmiany liter i bez spacji w środku. "
+        "Do tokenu osoby dopisz po dwukropku przypadek, w jakim osoba stoi w Twoim zdaniu, "
+        "a imię i nazwisko wrócą odmienione: „Szanowny Panie <OSOBA_1:wołacz>”, „wniosek "
+        "<OSOBA_1:dopełniacz>”, „rozmawiałem z <OSOBA_1:narzędnik>”. W argumentach narzędzi "
+        "pisz <OSOBA_1:mianownik>. "
         "Nie twórz nowych tokenów i nie zgaduj, co się pod nimi kryje."
     ),
     "en": (
@@ -205,8 +205,14 @@ class MaskedTurn:
         ]
 
     def restore(self, text: str) -> str:
-        """Put the original values back in place of the turn's tokens; unknown tokens stay."""
-        return _TOKEN_RE.sub(lambda match: self._mapping.get(match[0], match[0]), text)
+        """Put the original values back in place of the turn's tokens; unknown tokens stay.
+
+        A person's token with a case after a colon, as the Polish note asks for, comes back
+        declined: ``<OSOBA_1:wołacz>`` is "Janie Kowalski" where the text said "Jana Kowalskiego".
+        A name the rules cannot decline for sure comes back as written, and so does any other
+        value; the case is dropped.
+        """
+        return restored(text, self._mapping)
 
     def restore_data(self, value: Any) -> Any:
         """Restore every string inside a JSON-like value, such as the arguments of a tool call.
@@ -236,7 +242,7 @@ class MaskedTurn:
         It runs no detector, so it is cheap enough for every answer; :meth:`sweep` also looks for
         personal data the answer added.
         """
-        return sorted({match[0] for match in _TOKEN_RE.finditer(text)} - self._mapping.keys())
+        return sorted(set(tokens_written(text)) - self._mapping.keys())
 
     def sweep(self, restored_text: str) -> SweepReport:
         """Check a restored answer for invented tokens and personal data nobody sent.

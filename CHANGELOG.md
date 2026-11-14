@@ -7,6 +7,22 @@ only for a change that breaks something, as CONTRIBUTING.md describes.
 
 ## [Unreleased]
 
+### Added
+
+- **A person comes back in the case the model asks for.** A token stood for the form the text
+  wrote, so "wniosek pracownika Jana Kowalskiego" gave an answer "Szanowny Panie Jana
+  Kowalskiego". The model may now write the case after a colon, `<OSOBA_1:wołacz>`, and the name
+  comes back declined: "Szanowny Panie Janie Kowalski". The Polish note of `token_instructions`
+  asks for it, with `<OSOBA_1:mianownik>` in a tool's arguments, and every restore understands
+  it: `MaskedTurn.restore` and `restore_data`, `Anonymizer.restore`, `StreamRestorer` when a
+  token and its case arrive cut apart, the Haystack components and both APIs of the gateway, a
+  tool's arguments staying valid JSON. Declined are names of one or two words the rules read for
+  sure, a listed first name and a surname such as Kowalski, Nowak, Bednarek, Mickiewicz or Duda,
+  written in capitals, in lowercase or without Polish letters as the value was. A surname alone
+  that may be a man's or a woman's, a foreign name, a company and a place come back as written,
+  and the case is dropped. A token without a case restores as before, and an invented one with
+  a case is reported by `unknown_tokens` and `sweep` as the token it declines.
+
 ### Fixed
 
 - **Ordinary English words** are no longer masked as names by the Polish model. Reading an agent's
