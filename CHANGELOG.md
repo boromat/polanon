@@ -5,7 +5,13 @@ All notable changes to this project are recorded here. The format follows
 [semantic versioning](https://semver.org/spec/v2.0.0.html); until 1.0, the second number goes up
 only for a change that breaks something, as CONTRIBUTING.md describes.
 
-## [Unreleased]
+## [0.3.5] - 2026-11-14
+
+A new way back for names and fixes for agents, and nothing that worked before stops working: a
+patch release, as CONTRIBUTING.md describes. The Polish note of `token_instructions` now asks the
+model to write a person's case after a token; a token without one restores as before. Where the
+Polish model read English as names it now finds less, so an agent's system prompt comes out with
+fewer tokens, and the gateway masks the prose of tools it used to send as written.
 
 ### Added
 
