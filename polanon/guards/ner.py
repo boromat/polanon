@@ -309,6 +309,108 @@ LABEL_STOPWORDS = frozenset(
 )
 
 
+#: Short English words Polish has no word for: the evidence that a line is English. Words the two
+#: languages share, such as "to", "a", "i", "on", "no", "do", "we", "by" and "most", are left out.
+_ENGLISH_WORDS = frozenset(
+    {
+        "the", "and", "of", "is", "are", "was", "were", "be", "been", "for", "with", "that",
+        "this", "these", "those", "you", "your", "it", "its", "it's", "they", "their", "them",
+        "there", "not", "if", "when", "then", "than", "from", "at", "an", "or", "can", "cannot",
+        "will", "would", "should", "must", "may", "might", "could", "have", "has", "had", "what",
+        "which", "who", "how", "why", "where", "all", "any", "each", "every", "only", "into",
+        "about", "after", "before", "over", "under", "between", "without", "within", "use",
+        "don't", "doesn't", "isn't", "here", "such", "some", "more", "other", "also", "just",
+        "very",
+    }
+)  # fmt: skip
+
+#: Short Polish words, with and without their diacritics: the evidence against.
+_POLISH_WORDS = frozenset(
+    {
+        "się", "sie", "nie", "jest", "są", "sa", "że", "ze", "oraz", "lub", "czy", "jak", "dla",
+        "przez", "jego", "jej", "ich", "który", "ktory", "która", "ktora", "które", "ktore",
+        "tak", "też", "tez", "już", "juz", "przy", "przed", "po", "od", "na", "w", "z", "o",
+        "pan", "pani", "panem", "proszę", "prosze", "tylko", "jeszcze", "tego", "tej", "ten",
+        "jako", "pod", "nad", "za", "bez", "ale", "gdy", "kiedy", "gdzie", "co", "kto", "mnie",
+        "mi", "nam", "sprawie",
+    }
+)  # fmt: skip
+
+_POLISH_LETTERS = re.compile("[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]")
+_WORD = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)?")
+
+#: Fewest English words that make a line English, and how many times the Polish ones they must
+#: outnumber.
+_ENGLISH_EVIDENCE = 3
+_ENGLISH_MARGIN = 3
+
+#: What may stand between the start of a sentence and its first word: spaces, quotes, brackets and
+#: the marks of a Markdown list or heading.
+_SENTENCE_OPENERS = frozenset(" \t\"'“”„«»([*_`#>-•")
+_SENTENCE_ENDS = frozenset("\n.!?:;")
+
+
+def _is_english(line: str) -> bool:
+    """Return whether a line is plainly English: English words and no sign of Polish.
+
+    A line with one Polish letter is Polish, and so is one whose Polish words come close in number
+    to its English ones, so a Polish sentence typed without diacritics stays Polish.
+    """
+    if _POLISH_LETTERS.search(line):
+        return False
+    words = [word.lower() for word in _WORD.findall(line)]
+    english = sum(word in _ENGLISH_WORDS for word in words)
+    polish = sum(word in _POLISH_WORDS for word in words)
+    return english >= _ENGLISH_EVIDENCE and english > _ENGLISH_MARGIN * polish
+
+
+def _capitalised(word: str) -> bool:
+    """Return whether a word is written as a name is: "Lindqvist", not "result", "NOT" or "APIs"."""
+    word = word.strip(".,;:!?()[]\"'“”„«»")
+    return bool(word) and word[0].isupper() and (len(word) == 1 or not word[1].isupper())
+
+
+def _opens_a_sentence(text: str, start: int) -> bool:
+    """Return whether the word at `start` begins its line or its sentence."""
+    index = start - 1
+    while index >= 0 and text[index] in _SENTENCE_OPENERS:
+        index -= 1
+    return index < 0 or text[index] in _SENTENCE_ENDS
+
+
+def _named_in_english(text: str, span: Span) -> bool:
+    """Return whether a span the Polish model found on an English line reads as a name.
+
+    Reading English, the Polish model tags ordinary words: "result", "NOT", "Safety", "the user's
+    own". Kept is a capitalised span in mid-sentence, such as "Maria Lindqvist" in "ask Maria
+    Lindqvist for it"; a name with a Polish letter never gets here, as its line is not English. A
+    name that opens a sentence is lost to this model; the rules still find a Polish first name
+    wherever it stands.
+    """
+    words = text[span.start : span.end].split()
+    return (
+        bool(words)
+        and words[0].lower() not in _ENGLISH_WORDS
+        and _capitalised(words[0])
+        and _capitalised(words[-1])
+        and not _opens_a_sentence(text, span.start)
+    )
+
+
+def _without_english_misreadings(text: str, spans: list[Span]) -> list[Span]:
+    """Drop what the Polish model read as a name on a plainly English line, unless it is one."""
+    english: dict[int, bool] = {}
+    kept = []
+    for span in spans:
+        line_start = text.rfind("\n", 0, span.start) + 1
+        if line_start not in english:
+            line_end = text.find("\n", span.start)
+            english[line_start] = _is_english(text[line_start : None if line_end < 0 else line_end])
+        if not english[line_start] or _named_in_english(text, span):
+            kept.append(span)
+    return kept
+
+
 def _is_only_labels(fragment: str) -> bool:
     """Return whether a detected span is made entirely of form and heading words."""
     words = [word.strip(".:,()").lower() for word in fragment.split()]
@@ -445,7 +547,10 @@ class NerGuard(Guard):
                     continue
                 start, end = offset + entity.start_char, offset + entity.end_char
                 spans.extend(self._line_spans(text, start, end, str(entity_type)))
-        return _join_hyphenated(text, spans)
+        spans = _join_hyphenated(text, spans)
+        if getattr(nlp, "lang", "pl") == "pl":
+            spans = _without_english_misreadings(text, spans)
+        return spans
 
     def _line_spans(self, text: str, start: int, end: int, entity_type: str) -> list[Span]:
         """Split an entity at line breaks and trim surrounding whitespace.

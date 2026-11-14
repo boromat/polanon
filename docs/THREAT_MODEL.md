@@ -76,7 +76,10 @@ tokens reach the provider, and puts the originals back into the answer, also whi
 - **Foreign documents are read by their labels and formats.** Tax and company numbers, accounts,
   phones, addresses and postcodes are found where a document prints them next to a label or in an
   official shape. A name in running English or German prose, a city and any format the rules have
-  never seen depend on the Polish language model, which reads those languages poorly.
+  never seen depend on the Polish language model, which reads those languages poorly. On a plainly
+  English line, such as the system prompt of an agent, it took ordinary words for names, so there
+  only a capitalised name in mid-sentence is kept: one that opens an English sentence is left to
+  the rules, which find a Polish first name, and nothing else of it.
 - **Identification by context.** "The finance director of the only steelworks in Stalowa Wola" names
   a person without naming them. The judge is asked to catch exactly this; a small local model will
   not catch all of it.

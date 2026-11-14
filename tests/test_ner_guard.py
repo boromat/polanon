@@ -89,6 +89,70 @@ def test_a_business_abbreviation_tagged_as_a_company_is_dropped():
     assert [text[s.start : s.end] for s in guard.detect(text, {"ORG"})] == ["Orlen"]
 
 
+ENGLISH_AND_POLISH = (
+    "Safety: NOT every result goes to The Workspace, so ask Maria Lindqvist for the results.\n"
+    "Zadzwoń do pani nowak w sprawie umowy.\n"
+    "Prosze o kontakt z panem kowalskim w sprawie faktury."
+)
+
+
+def _found(guard: NerGuard, text: str, entities: list[_Entity]) -> list[str]:
+    guard._nlp = lambda _text: _Document(entities)
+    return [text[s.start : s.end] for s in guard.detect(text, {"PERSON", "LOCATION", "ORG"})]
+
+
+def test_on_an_english_line_the_polish_model_keeps_only_names_in_mid_sentence():
+    """An agent's English system prompt came back with 89 tokens, for "result", "NOT", "Safety".
+
+    The Polish model reads English words as names. On a plainly English line only a capitalised
+    name in mid-sentence is kept; Polish lines, in lowercase or without diacritics, stay as they
+    were.
+    """
+    text = ENGLISH_AND_POLISH
+    entities = [
+        _Entity(text, "Safety", "orgName"),
+        _Entity(text, "NOT", "orgName"),
+        _Entity(text, "result", "orgName"),
+        _Entity(text, "The Workspace"),
+        _Entity(text, "Maria Lindqvist", "persName"),
+        _Entity(text, "results", "orgName"),
+        _Entity(text, "nowak", "persName"),
+        _Entity(text, "kowalskim", "persName"),
+    ]
+    assert _found(NerGuard(), text, entities) == ["Maria Lindqvist", "nowak", "kowalskim"]
+
+
+def test_an_english_model_is_trusted_on_english_lines():
+    class _EnglishModel:
+        lang = "en"
+
+        def __init__(self, document: _Document) -> None:
+            self._document = document
+
+        def __call__(self, _text: str) -> _Document:
+            return self._document
+
+    text = ENGLISH_AND_POLISH
+    guard = NerGuard(spacy_model="en_core_web_sm")
+    guard._nlp = _EnglishModel(_Document([_Entity(text, "Safety", "ORG")]))
+    assert [text[s.start : s.end] for s in guard.detect(text, {"ORG"})] == ["Safety"]
+
+
+@needs_model
+def test_ordinary_english_words_are_not_names(guard):
+    text = (
+        "You are a helpful assistant that runs on the user's own computer.\n"
+        "Safety: Verify every claim before you act, and explain what you changed.\n"
+        "Grounding: quote the documentation when you rely on it.\n"
+        "Please send the signed contract to Maria Lindqvist at Northwind Traders today.\n"
+        "Proszę zadzwonić do pani Anny Nowak z firmy Orlen w poniedziałek."
+    )
+    found = {text[s.start : s.end] for s in guard.detect(text, set(LABEL_MAP.values()))}
+    assert not found & {"the user's own", "Safety", "Grounding"}
+    assert any("Maria Lindqvist" in fragment for fragment in found)
+    assert {"Anny Nowak", "Orlen"} <= found
+
+
 def test_missing_model_raises_an_actionable_error():
     pytest.importorskip("spacy")  # without spaCy the error names the extra instead, tested apart
     with pytest.raises(RuntimeError, match="spacy download"):

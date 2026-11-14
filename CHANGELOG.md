@@ -5,6 +5,21 @@ All notable changes to this project are recorded here. The format follows
 [semantic versioning](https://semver.org/spec/v2.0.0.html); until 1.0, the second number goes up
 only for a change that breaks something, as CONTRIBUTING.md describes.
 
+## [Unreleased]
+
+### Fixed
+
+- **Ordinary English words** are no longer masked as names by the Polish model. Reading an agent's
+  English system prompt through the gateway, it tagged "result", "NOT", "Safety" and "the user's
+  own" as companies, people and places: 89 tokens in one call, a prompt the model could hardly
+  read, and, since the same words stood in the tool descriptions, a call the gateway's last check
+  refused. On a plainly English line, one with English words, few Polish ones and no Polish
+  letter, a span the Polish model finds is kept only as a capitalised name in mid-sentence, such as
+  "Maria Lindqvist" in "ask Maria Lindqvist for it". A name that opens an
+  English sentence is left to the rules, which find a Polish first name anywhere. Polish lines,
+  in lowercase or without diacritics, and an English spaCy model are untouched; the benchmark is
+  unchanged.
+
 ## [0.3.4] - 2026-11-14
 
 A new extra and fixes, and nothing that worked before stops working: a patch release, as
