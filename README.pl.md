@@ -478,6 +478,9 @@ Co robi z jednym wywołaniem:
   potrzebuje w odpowiedzi także mapy tokenów: flaga jest zdejmowana zanim dostawca zobaczy
   żądanie, a obiekt `return_pii_map` trafia do odpowiedzi JSON albo do ostatniego zdarzenia
   strumienia. Mapa nie jest logowana ani wysyłana do dostawcy.
+- `--skip-system` przy chat completions zostawia bez maski wiadomości system i developer oraz
+  definicje narzędzi, a maskuje tylko user, assistant i tool, więc kontekst firmy w prompcie
+  nie staje się tokenami ani wpisami w `return_pii_map`.
 
 Klucze zostają u tego, kto uruchamia bramkę, i są brane wyłącznie ze zmiennych środowiskowych.
 Domyślnie bramka przekazuje dalej klucz narzędzia; `POLANON_UPSTREAM_KEY` wysyła zamiast niego

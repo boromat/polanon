@@ -85,6 +85,7 @@ def main(
         unsupported=_unsupported(args),
         max_body=args.max_body_mb * 1024 * 1024,
         timeout=args.timeout,
+        skip_system=args.skip_system,
     )
     app = Gateway(anonymizer, config)
     print(_banner(args, config, detection), file=sys.stderr)
@@ -146,6 +147,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--timeout", type=float, default=600.0, help="seconds to wait for the provider"
+    )
+    parser.add_argument(
+        "--skip-system",
+        action="store_true",
+        help="on chat completions, leave system and developer messages and tool definitions "
+        "unmasked; mask user, assistant and tool messages only",
     )
     return parser
 
@@ -209,9 +216,10 @@ def _banner(args: argparse.Namespace, config: Any, detection: str) -> str:
     else:
         keys = "the client's key is passed on"
     unmasked = "; images and files go to the provider unmasked" if args.pass_unsupported else ""
+    skip = "; system prompts and tools are not masked" if args.skip_system else ""
     return (
         f"polanon gateway on http://{args.host}:{args.port}/v1 -> {args.upstream}; "
-        f"masking with {detection}; {keys}{unmasked}"
+        f"masking with {detection}; {keys}{unmasked}{skip}"
     )
 
 

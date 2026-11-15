@@ -9,6 +9,12 @@ only for a change that breaks something, as CONTRIBUTING.md describes.
 
 ### Added
 
+- **`polanon-gateway --skip-system`.** On chat completions, system and developer
+  messages and the prose of tools, legacy functions and answer formats are sent
+  as they came; only user, assistant and tool messages are masked, so operator
+  context in the prompt does not end up in the turn's mapping or in
+  `return_pii_map`. The last leak check ignores the unmasked parts.
+
 - **`return_pii_map` on gateway calls.** Set `"return_pii_map": true` on a
   ``/v1/chat/completions``, ``/v1/responses`` or ``/v1/embeddings`` request and
   the gateway strips the flag before the call reaches the provider, then adds a

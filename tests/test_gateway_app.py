@@ -685,3 +685,71 @@ async def test_the_log_never_quotes_a_returned_mapping(caplog):
         )
     assert "return_pii_map" not in caplog.text
     assert not any(value in caplog.text for value in RAW)
+
+
+COMPANY = 'Firma "Kot & Syn" Sp. z o.o.'
+
+
+async def test_skip_system_leaves_system_and_tools_unmasked():
+    provider = Provider()
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "lookup", "description": f"Wyszukaj w systemie {COMPANY}."},
+        }
+    ]
+    body = {
+        "model": "gpt-test",
+        "messages": [
+            {"role": "system", "content": f"Jesteś asystentem {COMPANY}"},
+            {"role": "user", "content": "Jan Kowalski pyta o umowę."},
+        ],
+        "tools": tools,
+        "return_pii_map": True,
+    }
+    async with client(provider, skip_system=True) as gw:
+        response = await gw.post("/v1/chat/completions", json=body)
+    assert response.status_code == 200
+    sent = provider.requests[0][1]
+    assert COMPANY in sent["messages"][0]["content"]
+    assert COMPANY in sent["tools"][0]["function"]["description"]
+    assert sent["messages"][-1]["content"] == "<OSOBA_1> pyta o umowę."
+    mapping = response.json()["return_pii_map"]
+    assert mapping == {"<OSOBA_1>": "Jan Kowalski"}
+    assert all(COMPANY not in value for value in mapping.values())
+
+
+async def test_skip_system_allows_the_same_company_in_prompt_and_user_message():
+    provider = Provider()
+    body = {
+        "model": "gpt-test",
+        "messages": [
+            {"role": "system", "content": f"Obsługujesz {COMPANY}"},
+            {"role": "user", "content": f"Oddzwoń do {COMPANY}, kontakt Jan Kowalski."},
+        ],
+    }
+    async with client(provider, skip_system=True) as gw:
+        response = await gw.post("/v1/chat/completions", json=body)
+    assert response.status_code == 200
+    sent = provider.requests[0][1]
+    assert COMPANY in sent["messages"][0]["content"]
+    user = sent["messages"][1]["content"]
+    assert "Kowalski" not in user
+    assert COMPANY not in user or "<FIRMA" in user
+
+
+async def test_without_skip_system_the_prompt_is_masked_like_before():
+    provider = Provider()
+    async with client(provider) as gw:
+        await gw.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-test",
+                "messages": [
+                    {"role": "system", "content": f"Jesteś asystentem {COMPANY}."},
+                    {"role": "user", "content": "Jan Kowalski pyta."},
+                ],
+            },
+        )
+    sent = json.dumps(provider.requests[0][1], ensure_ascii=False)
+    assert "Kot & Syn" not in sent

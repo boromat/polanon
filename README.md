@@ -465,6 +465,10 @@ What it does with a call:
   the flag is stripped before the provider sees the call, and a `return_pii_map`
   object is added to the JSON body, or to the last event of a stream. The mapping
   is never logged or sent to the provider.
+- `--skip-system` on chat completions leaves system and developer messages and
+  tool definitions unmasked, and masks user, assistant and tool messages only, so
+  company context in the prompt does not become tokens or entries in
+  `return_pii_map`.
 
 Keys stay with whoever runs the gateway, and come from the environment only. By default the
 tool's own key is passed on; `POLANON_UPSTREAM_KEY` sends another one instead. The gateway listens

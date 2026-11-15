@@ -42,6 +42,13 @@ def test_the_gateway_listens_on_this_machine_by_default(capsys):
     assert "the client's key is passed on" in banner
 
 
+def test_skip_system_is_shown_on_the_banner(capsys):
+    status, served = run([*UPSTREAM, "--skip-system"])
+    assert status == 0
+    assert served.app._config.skip_system is True
+    assert "system prompts and tools are not masked" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.168.1.20", "gateway.lan"])  # noqa: S104
 def test_listening_beyond_this_machine_without_a_key_is_refused(host, capsys):
     status, served = run([*UPSTREAM, "--host", host])

@@ -32,6 +32,7 @@ from polanon.gateway.payloads import (
     mask_chat_request,
     mask_embeddings_request,
     mask_responses_request,
+    payload_for_leak_check,
     restore_chat_response,
     restore_responses_response,
 )
@@ -71,6 +72,8 @@ class GatewayConfig:
             unmasked.
         max_body: the largest request accepted, in bytes.
         timeout: seconds to wait for the provider.
+        skip_system: leave system and developer messages and tool definitions unmasked on chat
+            completions; only user, assistant and tool messages are masked.
     """
 
     upstream: str
@@ -80,6 +83,7 @@ class GatewayConfig:
     unsupported: Literal["refuse", "drop", "pass"] = "refuse"
     max_body: int = 10 * 1024 * 1024
     timeout: float = 600.0
+    skip_system: bool = False
 
 
 class _RefusalError(Exception):
@@ -176,9 +180,14 @@ class Gateway:
         body, return_pii_map = _return_pii_map_flag(body)
         turn = self._turn()
         masked = await self._mask(
-            lambda: mask_chat_request(turn, body, instructions=self._instructions)
+            lambda: mask_chat_request(
+                turn,
+                body,
+                instructions=self._instructions,
+                skip_system=self._config.skip_system,
+            )
         )
-        self._check(masked, turn)
+        self._check(masked, turn, skip_system_leak=self._config.skip_system)
         headers = self._upstream_headers(scope)
         if body.get("stream"):
             lines = _ChatLines(turn.mapping, return_pii_map=return_pii_map)
@@ -369,9 +378,12 @@ class Gateway:
                 400, "the request has a field of the wrong type", "invalid_request"
             ) from exc
 
-    def _check(self, masked: dict[str, Any], turn: MaskedTurn) -> None:
+    def _check(
+        self, masked: dict[str, Any], turn: MaskedTurn, *, skip_system_leak: bool = False
+    ) -> None:
         """The last check: refuse to send a payload that still holds an original value."""
-        leaked = leaked_tokens(masked, turn.mapping)
+        payload = payload_for_leak_check(masked, skip_system=skip_system_leak)
+        leaked = leaked_tokens(payload, turn.mapping)
         if leaked:
             logger.error("refused to send: original values of %s still in the payload", leaked)
             raise _RefusalError(

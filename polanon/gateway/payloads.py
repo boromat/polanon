@@ -30,6 +30,10 @@ _PROVIDER_STATE = ("previous_response_id", "conversation")
 #: Roles whose ``name`` field names a participant, which may be a person; for a ``tool`` or a
 #: ``function`` message it names the function and stays.
 _PARTICIPANT_ROLES = frozenset({"system", "developer", "user", "assistant"})
+#: Chat message roles left out of masking when the gateway is started with ``--skip-system``.
+_SKIP_SYSTEM_ROLES = frozenset({"system", "developer"})
+#: Chat request fields whose prose is not masked with ``--skip-system``.
+_SKIP_SYSTEM_TOOL_FIELDS = ("tools", "functions", "response_format")
 
 #: Fields of a chat completion request, other than the messages, that carry text the operator's
 #: users wrote: an end user's identifier, the metadata stored with a completion, and the content a
@@ -79,7 +83,11 @@ class GatewayRequestError(ValueError):
 
 
 def mask_chat_request(
-    turn: MaskedTurn, body: Mapping[str, Any], *, instructions: str | None = None
+    turn: MaskedTurn,
+    body: Mapping[str, Any],
+    *,
+    instructions: str | None = None,
+    skip_system: bool = False,
 ) -> dict[str, Any]:
     """Return a ``/chat/completions`` request with everything that carries data masked.
 
@@ -98,6 +106,9 @@ def mask_chat_request(
         body: the request as the client sent it; it is not modified.
         instructions: a note telling the model what the tokens are, added to the first system
             message or as a new one; None leaves the messages as they are.
+        skip_system: when set, ``system`` and ``developer`` messages and the prose of ``tools``,
+            ``functions`` and ``response_format`` are sent as they came; only ``user``,
+            ``assistant`` and ``tool`` messages are masked.
 
     Raises:
         GatewayRequestError: for a request without a list of messages, or one asking for audio.
@@ -110,16 +121,64 @@ def mask_chat_request(
     modalities = body.get("modalities")
     if isinstance(modalities, list) and any(item != "text" for item in modalities):
         raise GatewayRequestError("the polanon gateway can restore text answers only, not audio")
-    defined = _chat_definitions(body, turn.mask)
-    masked = [_without_participant(message) for message in turn.mask_messages(messages)]
-    out = {**body, **defined, "messages": masked}
+    if skip_system:
+        masked = _mask_chat_messages_skip_system(turn, messages)
+        out = {**body, "messages": masked}
+    else:
+        defined = _chat_definitions(body, turn.mask)
+        masked = [_without_participant(message) for message in turn.mask_messages(messages)]
+        out = {**body, **defined, "messages": masked}
+        if defined:
+            out.update(_chat_definitions(out, _known_values(turn)))
     for field in _TEXT_FIELDS:
         if body.get(field) is not None:
             out[field] = turn.mask_data(body[field])
-    if defined:
-        out.update(_chat_definitions(out, _known_values(turn)))
     if instructions:
-        out["messages"] = _with_instructions(masked, instructions)
+        out["messages"] = _with_instructions(out["messages"], instructions)
+    return out
+
+
+def payload_for_leak_check(payload: Any, *, skip_system: bool = False) -> Any:
+    """Return the part of a masked chat payload the last leak check should search.
+
+    With ``skip_system``, system and developer messages and tool definitions are left out, since
+    they were sent on purpose without masking.
+    """
+    if not skip_system or not isinstance(payload, dict):
+        return payload
+    out = {key: value for key, value in payload.items() if key not in _SKIP_SYSTEM_TOOL_FIELDS}
+    messages = out.get("messages")
+    if isinstance(messages, list):
+        out["messages"] = [
+            message
+            for message in messages
+            if not isinstance(message, Mapping) or message.get("role") not in _SKIP_SYSTEM_ROLES
+        ]
+    return out
+
+
+def _mask_chat_messages_skip_system(
+    turn: MaskedTurn, messages: list[Any]
+) -> list[dict[str, Any]]:
+    """Mask user, assistant and tool messages only, in order, without settling over the prompt."""
+    indexed = [
+        (index, message)
+        for index, message in enumerate(messages)
+        if isinstance(message, Mapping) and message.get("role") not in _SKIP_SYSTEM_ROLES
+    ]
+    masked_by_index: dict[int, dict[str, Any]] = {}
+    if indexed:
+        masked = [
+            _without_participant(message) for message in turn.mask_messages([item for _, item in indexed])
+        ]
+        for (index, _), item in zip(indexed, masked, strict=True):
+            masked_by_index[index] = item
+    out: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        if isinstance(message, Mapping) and message.get("role") in _SKIP_SYSTEM_ROLES:
+            out.append(dict(message))
+        else:
+            out.append(masked_by_index[index])
     return out
 
 
