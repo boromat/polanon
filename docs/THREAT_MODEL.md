@@ -221,7 +221,8 @@ calls, the keys or the logs. What it protects:
   With `return_pii_map` on the request, the same mapping is also returned to that client in the
   answer; it is as sensitive as the restored text, is never logged, and never goes to the provider.
   With `--skip-system`, system and developer prompts and tool definitions reach the provider
-  unmasked by design; only user, assistant and tool turns are masked and counted in the mapping.
+  unmasked on purpose. The mapping, and so `return_pii_map`, then holds only what was replaced
+  in user, assistant and tool messages. It is not a full picture of what the model was shown.
 
 What it does not protect, and is the operator's part:
 

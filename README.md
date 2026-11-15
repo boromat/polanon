@@ -466,9 +466,11 @@ What it does with a call:
   object is added to the JSON body, or to the last event of a stream. The mapping
   is never logged or sent to the provider.
 - `--skip-system` on chat completions leaves system and developer messages and
-  tool definitions unmasked, and masks user, assistant and tool messages only, so
-  company context in the prompt does not become tokens or entries in
-  `return_pii_map`.
+  tool definitions unmasked, and masks user, assistant and tool messages only.
+  Company context that lives only in the prompt or in a tool description does
+  not become a token. With `return_pii_map`, the object then lists only what
+  was replaced in user, assistant and tool messages. The same name in the
+  prompt and in the question stays in the prompt and is a token in the question.
 
 Keys stay with whoever runs the gateway, and come from the environment only. By default the
 tool's own key is passed on; `POLANON_UPSTREAM_KEY` sends another one instead. The gateway listens
