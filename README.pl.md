@@ -474,6 +474,10 @@ Co robi z jednym wywołaniem:
 - Niczego nie zapisuje na dysku. Narzędzie wysyła całą rozmowę przy każdym wywołaniu, a każde
   wywołanie jest maskowane i przywracane osobno. Z `POLANON_KEY` ustawionym na 64 znaki
   szesnastkowe dana osoba ma jeden token w każdym wywołaniu i w każdym przypadku gramatycznym.
+- Ustaw `"return_pii_map": true` przy wywołaniu chat, Responses albo embeddings, gdy wywołujący
+  potrzebuje w odpowiedzi także mapy tokenów: flaga jest zdejmowana zanim dostawca zobaczy
+  żądanie, a obiekt `return_pii_map` trafia do odpowiedzi JSON albo do ostatniego zdarzenia
+  strumienia. Mapa nie jest logowana ani wysyłana do dostawcy.
 
 Klucze zostają u tego, kto uruchamia bramkę, i są brane wyłącznie ze zmiennych środowiskowych.
 Domyślnie bramka przekazuje dalej klucz narzędzia; `POLANON_UPSTREAM_KEY` wysyła zamiast niego

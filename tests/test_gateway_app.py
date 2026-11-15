@@ -573,3 +573,115 @@ async def test_the_provider_s_error_on_a_responses_call_passes_through():
     async with client(Provider(status=429)) as gw:
         response = await gw.post("/v1/responses", json=responses_body("Hej."))
     assert response.status_code == 429
+
+
+# --- return_pii_map ------------------------------------------------------------------------------
+
+
+async def test_return_pii_map_adds_the_mapping_and_strips_the_flag_from_the_provider_request():
+    provider = Provider()
+    async with client(provider) as gw:
+        response = await gw.post(
+            "/v1/chat/completions",
+            json=chat(f"Jan Kowalski, PESEL {PESEL}.", return_pii_map=True),
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["return_pii_map"] == {"<OSOBA_1>": "Jan Kowalski", "<PESEL_1>": PESEL}
+    assert "return_pii_map" not in provider.requests[0][1]
+    assert (
+        response.json()["choices"][0]["message"]["content"] == f"Echo: Jan Kowalski, PESEL {PESEL}."
+    )
+
+
+async def test_return_pii_map_false_is_absent_from_the_answer_and_stripped():
+    provider = Provider()
+    async with client(provider) as gw:
+        response = await gw.post(
+            "/v1/chat/completions",
+            json=chat("Jan Kowalski.", return_pii_map=False),
+        )
+    assert response.status_code == 200
+    assert "return_pii_map" not in response.json()
+    assert "return_pii_map" not in provider.requests[0][1]
+
+
+async def test_return_pii_map_must_be_a_boolean():
+    provider = Provider()
+    async with client(provider) as gw:
+        response = await gw.post(
+            "/v1/chat/completions", json=chat("Jan Kowalski.", return_pii_map="yes")
+        )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+    assert provider.requests == []
+
+
+async def test_a_streamed_chat_answer_carries_the_mapping_on_the_last_event_only():
+    provider = Provider()
+    async with client(provider) as gw:
+        response = await gw.post(
+            "/v1/chat/completions",
+            json=chat("Jan Kowalski dzwonił.", stream=True, return_pii_map=True),
+        )
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: {")]
+    assert len(events) >= 1
+    assert all("return_pii_map" not in event for event in events[:-1])
+    assert events[-1]["return_pii_map"] == {"<OSOBA_1>": "Jan Kowalski"}
+    text = "".join(event["choices"][0]["delta"].get("content", "") for event in events)
+    assert text == "Echo: Jan Kowalski dzwonił."
+
+
+async def test_embeddings_can_return_the_mapping():
+    provider = Provider()
+    async with client(provider) as gw:
+        response = await gw.post(
+            "/v1/embeddings",
+            json={"model": "e", "input": ["Jan Kowalski"], "return_pii_map": True},
+        )
+    assert response.json()["return_pii_map"] == {"<OSOBA_1>": "Jan Kowalski"}
+    assert "return_pii_map" not in provider.requests[0][1]
+
+
+async def test_a_responses_answer_can_return_the_mapping():
+    received = []
+    async with client(_responses_provider(received)) as gw:
+        response = await gw.post(
+            "/v1/responses",
+            json=responses_body(f"Jan Kowalski, PESEL {PESEL}.", return_pii_map=True),
+        )
+    assert response.json()["return_pii_map"] == {"<OSOBA_1>": "Jan Kowalski", "<PESEL_1>": PESEL}
+    assert "return_pii_map" not in received[0]
+
+
+async def test_a_streamed_responses_answer_carries_the_mapping_on_the_last_event():
+    received = []
+    async with client(_responses_provider(received)) as gw:
+        response = await gw.post(
+            "/v1/responses",
+            json=responses_body("Jan Kowalski dzwonił.", stream=True, return_pii_map=True),
+        )
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: {")]
+    assert events[-1]["return_pii_map"] == {"<OSOBA_1>": "Jan Kowalski"}
+    assert all("return_pii_map" not in event for event in events[:-1])
+
+
+async def test_the_provider_s_error_carries_no_mapping():
+    async with client(Provider(status=429)) as gw:
+        response = await gw.post(
+            "/v1/chat/completions",
+            json=chat("Jan Kowalski.", return_pii_map=True),
+        )
+    assert response.status_code == 429
+    assert "return_pii_map" not in response.json()
+
+
+async def test_the_log_never_quotes_a_returned_mapping(caplog):
+    caplog.set_level(logging.INFO, logger="polanon.gateway")
+    async with client(Provider()) as gw:
+        await gw.post(
+            "/v1/chat/completions",
+            json=chat(f"Jan Kowalski, PESEL {PESEL}.", return_pii_map=True),
+        )
+    assert "return_pii_map" not in caplog.text
+    assert not any(value in caplog.text for value in RAW)

@@ -460,6 +460,11 @@ What it does with a call:
 - It keeps nothing on disk. A tool sends the whole conversation with every call, and each call is
   masked and restored on its own. With `POLANON_KEY` set to 64 hexadecimal characters, a person
   keeps one token in every call and in every grammatical case.
+- Set `"return_pii_map": true` on a chat, Responses or embeddings request when
+  the caller needs the token mapping in the answer as well as the restored text:
+  the flag is stripped before the provider sees the call, and a `return_pii_map`
+  object is added to the JSON body, or to the last event of a stream. The mapping
+  is never logged or sent to the provider.
 
 Keys stay with whoever runs the gateway, and come from the environment only. By default the
 tool's own key is passed on; `POLANON_UPSTREAM_KEY` sends another one instead. The gateway listens

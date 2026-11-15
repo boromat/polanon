@@ -218,6 +218,8 @@ calls, the keys or the logs. What it protects:
   `POLANON_GATEWAY_KEY`, which every client must then send, compared in constant time.
 - **What it keeps.** Nothing on disk: each call is masked and restored with a mapping that lives as
   long as the call. The log holds the path, the status, the time and counts of masked types.
+  With `return_pii_map` on the request, the same mapping is also returned to that client in the
+  answer; it is as sensitive as the restored text, is never logged, and never goes to the provider.
 
 What it does not protect, and is the operator's part:
 

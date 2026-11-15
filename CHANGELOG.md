@@ -7,6 +7,16 @@ only for a change that breaks something, as CONTRIBUTING.md describes.
 
 ## [Unreleased]
 
+### Added
+
+- **`return_pii_map` on gateway calls.** Set `"return_pii_map": true` on a
+  ``/v1/chat/completions``, ``/v1/responses`` or ``/v1/embeddings`` request and
+  the gateway strips the flag before the call reaches the provider, then adds a
+  `return_pii_map` object to the JSON answer, or to the last event of a stream,
+  with token to original value for that call. Text in the answer is still
+  restored as before. The mapping is as sensitive as the restored answer and is
+  never logged or sent upstream.
+
 ### Fixed
 
 - **An account number with a typo is masked whole as an IBAN, and never as a card.** A request
