@@ -20,7 +20,9 @@ Standard library only, so the guard also runs in the configuration without a lan
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
 
 from polanon.guards import _pesel_names
 from polanon.guards.base import Guard
@@ -504,30 +506,306 @@ def _feminine_oblique_forms(surname: str) -> list[str]:
     return [surname[:-1] + ending for ending in endings]
 
 
-def person_name_parts(name: str, *, needs_first_name: bool = False) -> list[str]:
+#: A vowel of the last syllable that the other cases of a noun surname drop: "Wróbel" and
+#: "Wróbla", "Kozieł" and "Kozła", "Krawiec" and "Krawca", "Dudek" and "Dudka", "Kozioł" and
+#: "Kozła".
+_FLEETING_VOWEL = re.compile(r"(?<=[^aąeęioóuy])(?:i?e(?=[cklł]$)|io(?=ł$))")
+#: An "e" after a soft "i" that the other cases may write "o" before a hard consonant, or the
+#: other way round: "Kozieł" and "Koziołowi", "Kozioł" and "Kozieła".
+_E_OR_O = re.compile(r"(?<=[^aąeęioóuy]i)[eo](?=[tdsznłr]$)")
+#: An "ó" before the last consonant, which the other cases write "o": "Mróz" and "Mroza". Not
+#: before a "w": "Lisów" is no nominative but the genitive plural of "Lis".
+_O_ACUTE = re.compile(r"ó(?=[^aąeęioóuyw]$)")
+#: An "o" in that place, which the nominative may write "ó".
+_PLAIN_O = re.compile(r"o(?=[^aąeęioóuy]$)")
+#: What a noun surname takes after its stem: the genitive, the dative and, for the family, the
+#: plural. The instrumental and the locative depend on the stem's last consonant.
+_NOUN_SURNAME_ENDINGS = ("a", "owi", "owie", "ów", "om", "ami", "ach")
+
+
+def _other_vowel(match: re.Match[str]) -> str:
+    return "o" if match[0] == "e" else "e"
+
+
+@lru_cache(maxsize=4096)
+def _noun_surname_forms(nominative: str) -> frozenset[str]:
+    """Return the other cases of a lowercase surname declined like a masculine noun.
+
+    The stem may keep its last vowel, drop it or change it, since surnames are declined each of
+    these ways: "kozieł" gives "kozieła", "kozła" and "koziołowi". Every stem gives every case,
+    so some forms are spellings nobody writes, such as "kisla" for "kisiel"; they are no words
+    either, and masking them hides nothing anybody needed to read.
+    """
+    stems = {
+        nominative,
+        _oblique_stem(nominative),
+        _FLEETING_VOWEL.sub("", nominative),
+        _E_OR_O.sub(_other_vowel, nominative),
+        _O_ACUTE.sub("o", nominative),
+    }
+    forms: set[str] = set()
+    for stem in stems:
+        forms.update(stem + ending for ending in _NOUN_SURNAME_ENDINGS)
+        forms.add(stem + ("iem" if stem.endswith(("k", "g")) else "em"))
+        forms.add(_masculine_locative(stem))
+    forms.discard(nominative)
+    return frozenset(forms)
+
+
+def _declines_as_a_noun(surname: str) -> bool:
+    """Whether a surname may decline like a masculine noun: one word that ends in a consonant."""
+    return len(surname) >= 3 and surname.isalpha() and surname[-1].lower() not in _VOWELS
+
+
+def _written_like(word: str, forms: Iterable[str]) -> list[str]:
+    """Write lowercase forms of `word` in its letter case: in capitals, or with its capital."""
+    if word.isupper():
+        return [form.upper() for form in forms]
+    return [word[0] + form[1:] for form in forms]
+
+
+def _masculine_oblique_forms(surname: str) -> list[str]:
+    """Return the cases of a noun surname that do not begin with it: "Wróbla", "Kozła", "Kocie".
+
+    The other cases of "Nowak" begin with it, so an occurrence of the surname inside them takes
+    the whole word; some cases of "Wróbel", "Kozieł" or "Kot" do not. A surname that ends in a
+    vowel has none here: "Kowalski" declines from its own spelling, "Bielska" and "Duda" have
+    their own forms.
+    """
+    if not _declines_as_a_noun(surname):
+        return []
+    key = surname.lower()
+    return _written_like(
+        surname, sorted(form for form in _noun_surname_forms(key) if not form.startswith(key))
+    )
+
+
+#: A feminine surname made of another with -owa or -ewa, which declines as an adjective:
+#: "Nowakowa", "Nowakowej". "Sowa" or "Głowa" is a noun.
+_ADJECTIVAL_WIFE_SURNAME = re.compile(r"^.{3,}[oe]wa$")
+
+
+def _declines_like_duda(surname: str) -> bool:
+    """Whether a surname ends in -a and declines like a feminine noun, for a man and a woman."""
+    key = surname.lower()
+    return (
+        len(key) >= 3
+        and key.isalpha()
+        and key.endswith("a")
+        and _FEMININE_ADJECTIVAL_SURNAME.search(fold(key)) is None
+        and _ADJECTIVAL_WIFE_SURNAME.search(key) is None
+    )
+
+
+def _a_surname_oblique_forms(surname: str) -> list[str]:
+    """Return "Dudy", "Dudzie", "Dudę", "Dudą" and "Dudo" for "Duda": the cases of an -a surname.
+
+    A man's and a woman's alike, as for Duda, Sikora or Sowa, and none of them begins with the
+    surname. A surname that declines as an adjective has its own forms: "Bielska" gives
+    "Bielskiej", and one in -owa, "Nowakowa", is left out.
+    """
+    if not _declines_like_duda(surname):
+        return []
+    key = surname.lower()
+    return _written_like(surname, sorted(form for form in decline_feminine(key) if form != key))
+
+
+def surname_forms(surname: str) -> list[str]:
+    """Return the cases of a surname that do not begin with it, whatever kind of surname it is."""
+    return [
+        *_feminine_oblique_forms(surname),
+        *_masculine_oblique_forms(surname),
+        *_a_surname_oblique_forms(surname),
+    ]
+
+
+_LOCATIVE = frozenset({"loc", "voc"})
+#: The case endings a noun surname may stand in, the last consonant of its stem that the locative
+#: softens, and the cases of one person each ending gives: "Kocie" is "Kot", "Mazurze" is
+#: "Mazur", "Koziele" is "Kozieł". The plural is the family's.
+_CASE_TAILS: tuple[tuple[str, str, frozenset[str]], ...] = (
+    ("owie", "", frozenset()),
+    ("owi", "", frozenset({"dat"})),
+    ("ach", "", frozenset()),
+    ("ami", "", frozenset()),
+    ("iem", "", frozenset({"ins"})),
+    ("em", "", frozenset({"ins"})),
+    ("om", "", frozenset()),
+    ("ów", "", frozenset()),
+    ("a", "", frozenset({"gen", "acc"})),
+    ("u", "", _LOCATIVE),
+    ("ie", "", _LOCATIVE),
+    ("ście", "st", _LOCATIVE),
+    ("cie", "t", _LOCATIVE),
+    ("dzie", "d", _LOCATIVE),
+    ("rze", "r", _LOCATIVE),
+    ("le", "ł", _LOCATIVE),
+)
+
+#: The endings of the other cases of a surname in -a, and what its nominative ends in instead:
+#: "Dudy" and "Dudzie" are "Duda", "Musze" is "Mucha", "Kani" is "Kania".
+_A_CASE_TAILS = (
+    ("y", "a"),
+    ("i", "a"),
+    ("i", "ia"),
+    ("ie", "a"),
+    ("ście", "sta"),
+    ("dzie", "da"),
+    ("rze", "ra"),
+    ("cie", "ta"),
+    ("le", "ła"),
+    ("ce", "ka"),
+    ("dze", "ga"),
+    ("sze", "cha"),
+    ("ę", "a"),
+    ("ą", "a"),
+    ("o", "a"),
+    ("u", "a"),
+)
+
+
+def noun_surname_nominatives(word: str, cases: Iterable[str] | None = None) -> list[str]:
+    """Return the surnames declined like a masculine noun of which `word` is another case.
+
+    "Koziołowi" gives "Kozieł", "Kozioł" and "Koziół", since a stem may change its vowel; one of
+    them may be a surname somebody stored. Each is checked by declining it again, so only a
+    surname that has `word` among its cases is returned, written with the capital `word` has.
+
+    Args:
+        word: a capitalised word.
+        cases: the cases `word` stands in, when something else tells, such as a first name next
+            to it; any case when omitted.
+    """
+    if not word[:1].isupper():
+        return []
+    wanted = None if cases is None else frozenset(cases)
+    return _written_like(word, _nominatives(word.lower(), wanted))
+
+
+@lru_cache(maxsize=65_536)
+def _nominatives(key: str, cases: frozenset[str] | None) -> tuple[str, ...]:
+    if len(key) < 4 or not key.isalpha():
+        return ()
+    found: set[str] = set()
+    for tail, consonant, tail_cases in _CASE_TAILS:
+        if not key.endswith(tail) or len(key) - len(tail) < 2:
+            continue
+        if cases is not None and not cases & tail_cases:
+            continue
+        stem = key[: len(key) - len(tail)] + consonant
+        for nominative in _stems_restored(stem):
+            if _declines_as_a_noun(nominative) and key in _noun_surname_forms(nominative):
+                found.add(nominative)
+    found.discard(key)
+    return tuple(sorted(found))
+
+
+def a_surname_nominatives(word: str, cases: Iterable[str] | None = None) -> list[str]:
+    """Return the surnames in -a of which `word` is another case: "Dudzie" gives "Duda".
+
+    Each is checked by declining it again, in one of `cases` when they are given.
+    """
+    if not word[:1].isupper():
+        return []
+    wanted = None if cases is None else frozenset(cases)
+    return _written_like(word, _a_nominatives(word.lower(), wanted))
+
+
+@lru_cache(maxsize=65_536)
+def _a_nominatives(key: str, cases: frozenset[str] | None) -> tuple[str, ...]:
+    if len(key) < 3 or not key.isalpha() or key.endswith("a"):
+        return ()
+    found: set[str] = set()
+    for tail, ending in _A_CASE_TAILS:
+        if not key.endswith(tail) or len(key) - len(tail) < 2:
+            continue
+        nominative = key[: len(key) - len(tail)] + ending
+        if not _declines_like_duda(nominative):
+            continue
+        forms = decline_feminine(nominative)
+        if key in forms and (cases is None or cases & forms[key]):
+            found.add(nominative)
+    return tuple(sorted(found))
+
+
+def declined_surname_nominatives(name: str) -> list[str]:
+    """Return the nominatives the surname of a name in an oblique case may have.
+
+    "Adama Kozieła": "Adama" is only a genitive, so "Kozieła" is one too, of "Kozieł" or of
+    "Kozioł", and the rules, which list neither, read the name as written. Given a first name
+    this guard knows in no nominative and one other word, the other word is read as a surname in
+    the cases the first name stands in: declined like a masculine noun after a man's first name,
+    and like Duda after any. Nothing for a name whose first name may be a nominative too, such
+    as "Kamila", Kamil's genitive and a woman's name.
+    """
+    words = [word.strip(".,;:()") for word in name.split()]
+    if len(words) != 2:
+        return []
+    for first, other in (words, words[::-1]):
+        tags = NAME_FORMS.get(fold(first))
+        if not tags or any(case == "nom" for _, case in tags) or fold(other) in NAME_FORMS:
+            continue
+        if not _WORD.fullmatch(other) or not _name_shaped(other):
+            return []
+        cases = {case for _, case in tags}
+        found = a_surname_nominatives(other, cases)
+        if any(gender == "m" for gender, _ in tags):
+            found += noun_surname_nominatives(other, cases)
+        return found
+    return []
+
+
+def _stems_restored(stem: str) -> set[str]:
+    """Return the nominatives a stem may come from: itself, with a vowel put back or changed."""
+    restored = {stem, _E_OR_O.sub(_other_vowel, stem), _PLAIN_O.sub("ó", stem)}
+    if len(stem) >= 3 and stem[-1] not in _VOWELS and stem[-2] not in _VOWELS:
+        restored.update(stem[:-1] + vowel + stem[-1] for vowel in ("e", "ie", "io"))
+    return restored
+
+
+def forget_forms() -> None:
+    """Drop the cases worked out for the latest surnames and words, and the words with them."""
+    _noun_surname_forms.cache_clear()
+    _nominatives.cache_clear()
+    _a_nominatives.cache_clear()
+
+
+def person_name_parts(
+    name: str, *, needs_first_name: bool = False, cases: bool = True
+) -> list[str]:
     """Return the words of a person's name that point to the person on their own: the surname.
 
     "Jan Kowalski" gives "Kowalski", "Anna Nowak-Kępa" gives "Nowak-Kępa", "Nowak" and "Kępa".
     "Natalia Bielska" gives "Bielska" with "Bielskiej" and "Bielską", the cases that do not begin
-    with it. A first name this guard knows is left out, and so are titles, initials and common
-    adjectives: "Jan" or "Krakowska" alone point to nobody. A first name the guard does not know is
-    kept, since nothing tells it from the surname.
+    with it, and "Paweł Wróbel" gives "Wróbel" with "Wróbla", "Wróblowi" and the other cases
+    whose stem drops or changes a vowel, as "Kozieł" gives "Kozła" and "Koziołowi"; "Anna Duda"
+    gives "Duda" with "Dudy", "Dudzie", "Dudę", "Dudą" and "Dudo". A first name
+    this guard knows is left out, and so are titles, initials and common adjectives: "Jan" or
+    "Krakowska" alone point to nobody. A first name the guard does not know is kept, since
+    nothing tells it from the surname.
 
     Args:
         name: a detected name of two to four words.
         needs_first_name: give parts only when the name has a first name this guard knows, for a
             name whose detection cannot be trusted on its own.
+        cases: give the cases that do not begin with the surname too; without them, the surname
+            alone, as a store of tokens keeps it.
     """
     words = name.split()
     if not 2 <= len(words) <= 4:
         return []
-    parts: list[str] = []
+    surnames: list[str] = []
     has_first_name = False
+    #: A first name in no nominative, "Adama", puts the surname next to it in another case too,
+    #: and the cases of "Bednarka" are no cases of the surname.
+    in_another_case = False
     for word in words:
         bare = word.strip(".,;:()")
         key = fold(bare)
         if all(part in NAME_FORMS for part in key.split("-")):  # "Jan", "Anna-Maria"
             has_first_name = True
+            tags = NAME_FORMS.get(key, ())
+            in_another_case |= bool(tags) and all(case != "nom" for _, case in tags)
             continue
         if len(bare) < 3 or not _WORD.fullmatch(bare) or not _name_shaped(bare):
             continue
@@ -537,15 +815,16 @@ def person_name_parts(name: str, *, needs_first_name: bool = False) -> list[str]
             continue
         if is_common_adjective(bare):
             continue
-        parts.append(bare)
-        parts.extend(_feminine_oblique_forms(bare))
+        surnames.append(bare)
         if "-" in bare:
-            for part in bare.split("-"):
-                if len(part) >= 3 and fold(part) not in NAME_FORMS:
-                    parts.append(part)
-                    parts.extend(_feminine_oblique_forms(part))
+            surnames += [p for p in bare.split("-") if len(p) >= 3 and fold(p) not in NAME_FORMS]
     if needs_first_name and not has_first_name:
         return []
+    parts: list[str] = []
+    for surname in surnames:
+        parts.append(surname)
+        if cases and not in_another_case:
+            parts.extend(surname_forms(surname))
     return parts
 
 
