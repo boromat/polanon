@@ -42,6 +42,11 @@ _ESCAPED = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "/": "/"}
 #: Halves of a character above U+FFFF, which JSON writes as two escapes, "\ud83d\ude00".
 _HIGH_SURROGATES = range(0xD800, 0xDC00)
 _LOW_SURROGATES = range(0xDC00, 0xE000)
+#: A token with a word after its colon, as :data:`polanon.policy.CASED_TOKEN_PATTERN` reads one.
+#: A word that names no case is text, "<OSOBA_1:Kowalski>", and the guards read the colon before
+#: it as a space: glued to "OSOBA_1:" the Polish model found no surname, and what it found it
+#: read as an identifier, so the surname went out in the clear.
+_WORD_AFTER_THE_COLON = r"<[A-Z_]+_\d+(?P<colon>:)(?P<word>[^\W\d_]+)>"
 #: A text containing none of these is read by the guards exactly as written, which is nearly always.
 _NEEDS_VIEW = re.compile(
     "[\u0300-\u036f\uff01-\uff5e"
@@ -50,6 +55,8 @@ _NEEDS_VIEW = re.compile(
     + "".join(sorted(INVISIBLE))
     + "]|"
     + _ESCAPE.pattern
+    + "|"
+    + _WORD_AFTER_THE_COLON
 )
 
 
@@ -87,6 +94,10 @@ def detection_view(text: str) -> View | None:
     read as one word with the "n", "\tMarek Wiśniewski" and "\r\nKatarzyna Zielińska" went out
     whole, and "Wi\u015bniewski" was no name to the rules. The guards read such an escape as the
     character it stands for.
+
+    In "<OSOBA_1:Kowalski>" the word after the colon names no case, so it is text, and the guards
+    read the colon as a space; in "<OSOBA_1:celownik>" the whole token is masked text, read as
+    written.
     """
     special = _NEEDS_VIEW.search(text)
     if special is None:
@@ -97,6 +108,17 @@ def detection_view(text: str) -> View | None:
     index = 0
     length = len(text)
     while index < length:
+        colon = -1 if special is None else special.start("colon")
+        if special is not None and colon >= 0:
+            chars.append(text[index:colon])
+            starts.extend(range(index, colon))
+            ends.extend(range(index + 1, colon + 1))
+            chars.append(":" if _names_a_case(special["word"]) else " ")
+            starts.append(colon)
+            ends.append(colon + 1)
+            index = colon + 1
+            special = _NEEDS_VIEW.search(text, index)
+            continue
         # The characters before the next one to read differently are read as written, in one go;
         # the last of them stays out when a combining mark follows it, which it is read with.
         stop = length if special is None else special.start()
@@ -155,6 +177,13 @@ def _unescaped(text: str, escape: re.Match[str]) -> tuple[str, int] | None:
     elif code in _LOW_SURROGATES:
         return None
     return read_cluster(chr(code)), end
+
+
+def _names_a_case(word: str) -> bool:
+    """Return whether the word after a token's colon is the name of a case, "celownik"."""
+    from polanon._inflection import case_of  # it reads names through this module
+
+    return case_of(word) is not None
 
 
 def _between_words(text: str, index: int, end: int) -> bool:

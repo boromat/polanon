@@ -803,3 +803,32 @@ def test_a_single_line_text_without_sentences_is_cut_at_a_space():
     pieces = list(_chunks(text, 50))
     assert "".join(piece for _, piece in pieces) == text
     assert all(piece.endswith(" ") for _, piece in pieces)
+
+
+@needs_model
+@pytest.mark.parametrize(
+    ("text", "word"),
+    [
+        ("Wczoraj zadzwoniła <OSOBA_4:Kubiak> z działu kadr w sprawie umowy.", "Kubiak"),
+        ("Umowę podpisał <OSOBA_1:Kowalski> w imieniu zarządu.", "Kowalski"),
+        ("Paczka pojedzie do <MIEJSCE_2:Gdynia> jutro rano.", "Gdynia"),
+    ],
+)
+def test_a_name_written_after_a_token_s_colon_is_masked(text, word):
+    """A word after the colon that names no case is text, not a case of the token. Glued to
+    "OSOBA_4:", the model found no name there, or one it read as an identifier, and the surname
+    went out in the clear."""
+    from polanon import Anonymizer, default_guards
+
+    anonymizer = Anonymizer(guards=default_guards())
+    result = anonymizer.anonymize_sync(text, {})
+    assert word not in result.anonymized
+    assert Anonymizer.restore(result.anonymized, result.mapping) == text
+
+
+@needs_model
+def test_a_case_after_a_token_s_colon_is_part_of_the_token():
+    from polanon import Anonymizer, default_guards
+
+    text = "Pismo do <OSOBA_7:celownik> wysłano wczoraj, a odpowiedź do <OSOBA_8:wolacz>."
+    assert Anonymizer(guards=default_guards()).anonymize_sync(text, {}).anonymized == text
