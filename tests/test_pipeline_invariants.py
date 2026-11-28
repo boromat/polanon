@@ -245,6 +245,20 @@ def test_the_view_reads_plain_runs_between_special_characters_as_written():
     assert text[view.starts[at] : view.ends[at]] == "e" + chr(0x301)
 
 
+def test_the_view_reads_the_colon_before_a_word_that_names_no_case_as_a_space():
+    """ "<OSOBA_1:Kowalski>" holds a surname, which the guards read apart from the token; a case
+    after the colon, in any letter case and with or without Polish letters, is token."""
+    text = r"Do <OSOBA_1:Kowalski>, <OSOBA_2:celownik>, <OSOBA_3:Wolacz>,\n<X_1:Nowak>."
+    view = detection_view(text)
+    assert view is not None
+    assert view.text == "Do <OSOBA_1 Kowalski>, <OSOBA_2:celownik>, <OSOBA_3:Wolacz>,\n<X_1 Nowak>."
+    at = view.text.index(" Kowalski")
+    assert text[view.starts[at] : view.ends[at]] == ":"
+    at = view.text.index("Nowak")
+    assert text[view.starts[at] : view.ends[at]] == "N"
+    assert detection_view("Do <OSOBA_2:celownik>.").text == "Do <OSOBA_2:celownik>."
+
+
 def fullwidth(text):
     return "".join(chr(ord(character) + 0xFEE0) if character != " " else " " for character in text)
 

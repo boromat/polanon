@@ -7,6 +7,17 @@ only for a change that breaks something, as CONTRIBUTING.md describes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A name written after a token's colon is masked.** After the colon of a token a model writes
+  the case its sentence needs, `<OSOBA_1:celownik>`, and the token is masked text. Any other
+  word there is text, as the pipeline already read it, but the guards did not: glued to
+  `OSOBA_4:`, the Polish model found no surname in `<OSOBA_4:Kubiak>`, or found one it read as
+  an identifier, and the surname went out in the clear. The guards now read the colon before
+  such a word as a space, so the surname is masked and comes back on restore, as
+  `<OSOBA_4:<OSOBA_5>>`; a case after the colon stays part of the token. The arbiter also trims
+  the `>` that FastPDN read onto the end of a name.
+
 ## [0.4.5] - 2026-11-28
 
 A patch release with an option and a speed-up. The arbiter, off by default, reads Polish lines

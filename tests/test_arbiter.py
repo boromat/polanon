@@ -11,6 +11,7 @@ import pytest
 import polanon
 from polanon import NerModelUnavailableError, arbiter_available, default_guards
 from polanon._detection import detect
+from polanon._view import detection_view
 from polanon.guards import _arbiter_weights as fitted
 from polanon.guards._fastpdn import Entity
 from polanon.guards.arbiter import ArbiterGuard, fastpdn_type, polish_runs
@@ -39,7 +40,7 @@ class FastPDN:
 
 def masked(guard, text):
     rules = default_guards(with_ner=False)
-    spans = detect(text, None, ALL, [*rules, guard])
+    spans = detect(text, detection_view(text), ALL, [*rules, guard])
     return sorted((text[s.start : s.end], s.entity_type) for s in spans if s.source == guard.name)
 
 
@@ -146,6 +147,15 @@ def test_what_fastpdn_s_pieces_carry_at_an_edge_is_trimmed(monkeypatch):
     found = masked(guard, text)
     assert ("Gdyni", "LOCATION") in found
     assert all(not value.endswith(".") and value != "Do" for value, _ in found)
+
+
+@pytest.mark.slow
+def test_a_name_after_a_token_s_colon_is_masked_without_the_token_s_bracket(monkeypatch):
+    monkeypatch.setitem(fitted.THRESHOLDS, "PERSON", 0.0)
+    text = "Umowę podpisał <OSOBA_1:Kowalski> w imieniu zarządu."
+    found = masked(ArbiterGuard(fastpdn=FastPDN(("Kowalski>", "nam_liv_person", 0.99))), text)
+    assert ("Kowalski", "PERSON") in found
+    assert all(">" not in value for value, _ in found)
 
 
 @pytest.mark.slow

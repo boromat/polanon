@@ -71,8 +71,9 @@ def fastpdn_type(group: str) -> str | None:
     return None
 
 
-#: What FastPDN's pieces of a word carry at the edge of an entity: "Gdyni." and "**Do".
-_EDGE = frozenset(".,;:!?()[]{}\"'„”“«»*")
+#: What FastPDN's pieces of a word carry at the edge of an entity: "Gdyni.", "**Do", and the ">"
+#: closing "<OSOBA_1:Kowalski>".
+_EDGE = frozenset(".,;:!?()[]{}<>\"'„”“«»*")
 
 #: Words FastPDN takes for companies in an agent's calls that name nobody.
 _SOFTWARE = frozenset({"markdown", "nas"})
